@@ -5,15 +5,27 @@ from tkinter.messagebox import showinfo, showerror
 
 filename = None
 font = "Arial"
-font_size = 12
-actual_font_size = 12
+font_size_for_screen = 12
+font_size = font_size_for_screen
+
+root = tk.Tk()
+
+screen_height = root.winfo_screenheight()
+
+text = tk.Text(root, width=400, height=400, bg="#303030", fg="#E4E4E4", insertbackground="#555555", font=(font, font_size), undo=True, autoseparators=False, maxundo=-1)
+text.pack()
 
 def newFile():
     global filename
     filename = "Untitled (Unsaved)"
+    global font_size_for_screen
+    font_size_for_screen = int(screen_height / 100)
+    print("Font size for screen: " + str(font_size_for_screen))
     text.delete(0.0, tk.END)
     text.edit_reset()
-    
+
+newFile()
+
 def change_font(changed_font):
     global font
     font = changed_font
@@ -24,14 +36,18 @@ def change_font_size(changed_font_size):
     font_size = changed_font_size
     text.config(font=(font, font_size))
     
-def zoom_in():
+def zoom_in(event=None):
     global font_size
-    font_size += max(1, int(font_size / 10))
+    if font_size >= 100:
+        return
+    font_size += max(2, int(font_size / 10))
     text.config(font=(font, font_size))
 
-def zoom_out():
+def zoom_out(event=None):
     global font_size
-    font_size -= max(1, int(font_size / 10))
+    if font_size <= 8:
+        return
+    font_size -= max(2, int(font_size / 10))
     text.config(font=(font, font_size))
 
 def saveFile():
@@ -62,14 +78,12 @@ def openFile():
 
 def undo():
     try:
-        time.sleep(0.15)
         text.edit_undo()
     except tk.TclError:
         pass
 
 def redo():
     try:
-        time.sleep(0.15)
         text.edit_redo() 
     except tk.TclError:
         pass
@@ -102,28 +116,23 @@ def shortcuts():
         tk.Label(window, text=action, font=("Arial", 12)).grid(row=row, column=0, padx=20, pady=5)
         tk.Label(window, text=shortcut, font=("Arial", 12)).grid(row=row, column=1, padx=20, pady=5)
 
-root = tk.Tk()
-
 screen_width = root.winfo_screenwidth()
 screen_height = root.winfo_screenheight()
 
 root.title("Text Editor")
 root.minsize(width=400, height=400)
 root.maxsize(width=2560, height=1440)
-root.bind_all("<Control-s>", lambda event: saveFile())
-root.bind_all("<Control-n>", lambda event: newFile())
-root.bind_all("<Control-o>", lambda event: openFile())
-root.bind_all("<Control-z>", lambda event: undo())
-root.bind_all("<Control-y>", lambda event: redo())
-root.bind_all("<Control-x>", lambda event: text.event_generate("<<Cut>>"))
-root.bind_all("<Control-c>", lambda event: text.event_generate("<<Copy>>"))
-root.bind_all("<Control-v>", lambda event: text.event_generate("<<Paste>>"))
-root.bind_all("<Control-0>", lambda event: text.config(font=(font, actual_font_size)))
-root.bind_all("<Control-equal>", zoom_in)
-root.bind_all("<Control-minus>", zoom_out)
-
-text = tk.Text(root, width=400, height=400, bg="#303030", fg="#E4E4E4", insertbackground="#555555", font=(font, font_size), undo=True, autoseparators=True, maxundo=-1)
-text.pack()
+root.bind("<Control-s>", lambda event: saveFile())
+root.bind("<Control-n>", lambda event: newFile())
+root.bind("<Control-o>", lambda event: openFile())
+root.bind("<Control-z>", lambda event: undo())
+root.bind("<Control-y>", lambda event: redo())
+root.bind("<Control-x>", lambda event: text.event_generate("<<Cut>>"))
+root.bind("<Control-c>", lambda event: text.event_generate("<<Copy>>"))
+root.bind("<Control-v>", lambda event: text.event_generate("<<Paste>>"))
+root.bind("<Control-0>", lambda event: text.config(font=(font, font_size)))
+root.bind("<Control-8>", zoom_in) #########################
+root.bind("<Control-9>", zoom_out) ########################
 
 menubar = tk.Menu(root, font=("Arial", int(screen_width / 10)))
 filemenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
@@ -175,7 +184,7 @@ viewmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#55555
 viewmenu.add_command(label="Zoom In", command=zoom_in)
 viewmenu.add_command(label="Zoom Out", command=zoom_out)
 viewmenu.add_separator()
-viewmenu.add_command(label="Reset Zoom", command=lambda: text.config(font=(font, actual_font_size)))
+viewmenu.add_command(label="Reset Zoom", command=lambda: text.config(font=(font, font_size)))
 menubar.add_cascade(label="View", menu=viewmenu) 
 aboutmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 aboutmenu.add_command(label="About", command=about)
@@ -186,6 +195,6 @@ root.config(menu=menubar)
 
 root.mainloop()
 
-# Undo, Zoom Shortcuts are in progress
+# Undo is in progress
 
 # Bold, Italic, Underline, Alinging, Encoding, Searching and Replacing, Word Count, Save confirmation before new and open file, Auto Save, Dark and Light Modes, Window Dynamic Name can be added in the future updates.
