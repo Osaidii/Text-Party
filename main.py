@@ -7,12 +7,16 @@ filename = None
 font = "Arial"
 font_size_for_screen = 12
 font_size = font_size_for_screen
+current_mode = "dark"
+
+light_color = "#E4E4E4"
+dark_color = "#303030"
 
 root = tk.Tk()
 
 screen_height = root.winfo_screenheight()
 
-text = tk.Text(root, width=400, height=400, bg="#303030", fg="#E4E4E4", insertbackground="#555555", font=(font, font_size), undo=True, autoseparators=False, maxundo=-1)
+text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=False, maxundo=-1)
 text.pack()
 
 def newFile():
@@ -20,7 +24,6 @@ def newFile():
     filename = "Untitled (Unsaved)"
     global font_size_for_screen
     font_size_for_screen = int(screen_height / 100)
-    print("Font size for screen: " + str(font_size_for_screen))
     text.delete(0.0, tk.END)
     text.edit_reset()
 
@@ -87,6 +90,20 @@ def redo():
         text.edit_redo() 
     except tk.TclError:
         pass
+
+def change_mode_to_light():
+    global current_mode
+    if "Light" == current_mode:
+        return
+    text.config(bg=light_color, fg=dark_color)
+    current_mode = "Light"
+
+def change_mode_to_dark():
+    global current_mode
+    if "Dark" == current_mode:
+        return
+    text.config(fg=light_color, bg=dark_color) 
+    current_mode = "Dark"
 
 def about():
     showinfo(title="About", message="This is Text Party, a simple text editor where you can invite your friends or colleagues to collaborate in one single file.\n\nCreated by: Osaidii (Muhammad Osaid Hassan)\nVersion: 1.0\n\nFor more information, visit: https://github.com/Osaidii/text-party")
@@ -183,8 +200,10 @@ menubar.add_cascade(label="Font Size", menu=sizemenu)
 viewmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 viewmenu.add_command(label="Zoom In", command=zoom_in)
 viewmenu.add_command(label="Zoom Out", command=zoom_out)
-viewmenu.add_separator()
 viewmenu.add_command(label="Reset Zoom", command=lambda: text.config(font=(font, font_size)))
+viewmenu.add_separator()
+viewmenu.add_command(label="Light Mode", command=change_mode_to_light)
+viewmenu.add_command(label="Dark Mode", command=change_mode_to_dark)
 menubar.add_cascade(label="View", menu=viewmenu) 
 aboutmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 aboutmenu.add_command(label="About", command=about)
