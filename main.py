@@ -1,9 +1,10 @@
 import tkinter as tk
-import time
+import os
 from tkinter.filedialog import askopenfile, asksaveasfile
-from tkinter.messagebox import showinfo, showerror
+from tkinter.messagebox import showinfo, showerror, askyesnocancel
 
 filename = None
+change_name_to = None
 font = "Arial"
 font_size_for_screen = 12
 font_size = font_size_for_screen
@@ -16,18 +17,70 @@ root = tk.Tk()
 
 screen_height = root.winfo_screenheight()
 
-text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=False, maxundo=-1)
+text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=True, maxundo=-1)
 text.pack()
+text.edit_separator()
 
-def newFile():
+def is_file_saved():
+    global filename
+
+    if filename is None or filename == "Untitled (Unsaved)":
+        return True
+
+    try:
+        with open(filename, "r") as f:
+            saved_text = f.read()
+
+        current_text = text.get("1.0", tk.END)
+
+        return current_text == saved_text
+
+    except (FileNotFoundError, OSError):
+        return False
+
+def save_file_popup():
+    answer = askyesnocancel("Save File", "Do you want to save the file? It is currently unsaved.")
+    match answer:
+        case True:
+            save_as()
+            save_file()
+            return True
+        case False:
+            return True
+        case None:
+            return False
+
+def new_file():
+    print(not is_file_saved())
+    print(text.get("1.0, tk.END").strip())
+    if (not is_file_saved()) and text.get("1.0, tk.END").strip():
+        continue_forward = save_file_popup()
+        if continue_forward:
+            pass
+        else:
+            return
     global filename
     filename = "Untitled (Unsaved)"
     global font_size_for_screen
     font_size_for_screen = int(screen_height / 100)
     text.delete(0.0, tk.END)
-    text.edit_reset()
+        
+def open_file():
+    if not is_file_saved() and text.get("1.0, tk.END").strip():
+        continue_forward = save_file_popup()
+        if continue_forward:
+            pass
+        else:
+            return
+    filename = None
+    f = askopenfile(mode='r')
+    if f:
+        t = f.read()
+        f.close()
+        text.delete(0.0, tk.END)
+        text.insert(0.0, t)        
 
-newFile()
+new_file()
 
 def change_font(changed_font):
     global font
@@ -38,7 +91,7 @@ def change_font_size(changed_font_size):
     global font_size
     font_size = changed_font_size
     text.config(font=(font, font_size))
-    
+
 def zoom_in(event=None):
     global font_size
     if font_size >= 100:
@@ -53,14 +106,14 @@ def zoom_out(event=None):
     font_size -= max(2, int(font_size / 10))
     text.config(font=(font, font_size))
 
-def saveFile():
+def save_file():
     global filename
     t = text.get(0.0, tk.END)
     f= open(filename, 'w')
     f.write(t)
     f.close()
     
-def saveAs():
+def save_as():
     filename = None
     f = asksaveasfile(mode='w', defaultextension=".txt")
     t = text.get(0.0, tk.END)
@@ -68,16 +121,6 @@ def saveAs():
         f.write(t.rstrip())
     except:
         showerror(title="Oops!", message="Unable to save file...")
-
-def openFile():
-    filename = None
-    f = askopenfile(mode='r')
-    if f:
-        t = f.read()
-        f.close()
-        text.delete(0.0, tk.END)
-        text.insert(0.0, t)
-        text.edit_reset()
 
 def undo():
     try:
@@ -139,24 +182,24 @@ screen_height = root.winfo_screenheight()
 root.title("Text Editor")
 root.minsize(width=400, height=400)
 root.maxsize(width=2560, height=1440)
-root.bind("<Control-s>", lambda event: saveFile())
-root.bind("<Control-n>", lambda event: newFile())
-root.bind("<Control-o>", lambda event: openFile())
+root.bind("<Control-s>", lambda event: save_file())
+root.bind("<Control-n>", lambda event: new_file())
+root.bind("<Control-o>", lambda event: open_file())
 root.bind("<Control-z>", lambda event: undo())
 root.bind("<Control-y>", lambda event: redo())
 root.bind("<Control-x>", lambda event: text.event_generate("<<Cut>>"))
 root.bind("<Control-c>", lambda event: text.event_generate("<<Copy>>"))
 root.bind("<Control-v>", lambda event: text.event_generate("<<Paste>>"))
 root.bind("<Control-0>", lambda event: text.config(font=(font, font_size)))
-root.bind("<Control-8>", zoom_in) #########################
-root.bind("<Control-9>", zoom_out) ########################
+root.bind("<Control-8>", zoom_in)
+root.bind("<Control-9>", zoom_out)
 
 menubar = tk.Menu(root, font=("Arial", int(screen_width / 10)))
 filemenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
-filemenu.add_command(label="New", command=newFile) 
-filemenu.add_command(label="Open", command=openFile)
-filemenu.add_command(label="Save", command=saveFile)
-filemenu.add_command(label="Save As...", command=saveAs)
+filemenu.add_command(label="New", command=new_file) 
+filemenu.add_command(label="Open", command=open_file)
+filemenu.add_command(label="Save", command=save_file)
+filemenu.add_command(label="Save As...", command=save_as)
 filemenu.add_separator()
 filemenu.add_command(label="Quit", command=root.quit)
 menubar.add_cascade(label="File", menu=filemenu)
@@ -214,6 +257,6 @@ root.config(menu=menubar)
 
 root.mainloop()
 
-# Undo is in progress
+# Save confirmation before new and open file, Auto Save, Dynamic Window name is in progress,
 
-# Bold, Italic, Underline, Alinging, Encoding, Searching and Replacing, Word Count, Save confirmation before new and open file, Auto Save, Dark and Light Modes, Window Dynamic Name can be added in the future updates.
+# Bold, Italic, Underline, Alinging, Encoding, Searching and Replacing, Word Count can be added in the future updates.
