@@ -4,10 +4,11 @@ from tkinter.filedialog import askopenfile, asksaveasfile
 from tkinter.messagebox import showinfo, showerror, askyesnocancel
 
 filename = None
+filepath = None
+last_saved_filename = None
 change_name_to = None
 font = "Arial"
-font_size_for_screen = 12
-font_size = font_size_for_screen
+
 current_mode = "dark"
 
 light_color = "#E4E4E4"
@@ -16,29 +17,35 @@ dark_color = "#303030"
 root = tk.Tk()
 
 screen_height = root.winfo_screenheight()
+font_size = screen_height / 80
 
 text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=True, maxundo=-1)
 text.pack()
 text.edit_separator()
 
-def is_file_saved():
+
+
+
+
+
+
+
+
+
+
+def is_file_saved(): ###########
     global filename
-
-    if filename is None or filename == "Untitled (Unsaved)":
-        return True
-
+    if filename is None or filename == "Untitled":
+        return False
     try:
         with open(filename, "r") as f:
             saved_text = f.read()
-
         current_text = text.get("1.0", tk.END)
-
         return current_text == saved_text
-
     except (FileNotFoundError, OSError):
         return False
 
-def save_file_popup():
+def save_file_popup(): ###########
     answer = askyesnocancel("Save File", "Do you want to save the file? It is currently unsaved.")
     match answer:
         case True:
@@ -50,37 +57,68 @@ def save_file_popup():
         case None:
             return False
 
-def new_file():
-    print(not is_file_saved())
-    print(text.get("1.0, tk.END").strip())
-    if (not is_file_saved()) and text.get("1.0, tk.END").strip():
+def new_file(): ############
+    if (not is_file_saved()) and text.get("1.0", tk.END).strip():
         continue_forward = save_file_popup()
         if continue_forward:
             pass
         else:
             return
     global filename
-    filename = "Untitled (Unsaved)"
-    global font_size_for_screen
-    font_size_for_screen = int(screen_height / 100)
+    global last_saved_filename
+    filename = "Untitled"
+    last_saved_filename = filename
     text.delete(0.0, tk.END)
-        
+
+new_file()
+
 def open_file():
-    if not is_file_saved() and text.get("1.0, tk.END").strip():
+    global filename
+    if not is_file_saved() and text.get("1.0", tk.END).strip():
         continue_forward = save_file_popup()
         if continue_forward:
             pass
         else:
             return
+    
+    try:
+        f = askopenfile(mode='r')
+    except:
+        showerror(title = "Failed", message = "Failed to Open File, maybe the file was altered, or maybe just try again")
+        return
     filename = None
-    f = askopenfile(mode='r')
     if f:
         t = f.read()
         f.close()
         text.delete(0.0, tk.END)
-        text.insert(0.0, t)        
+        text.insert(0.0, t)     
+        filename = f.name   
 
-new_file()
+def save_file():
+    global filename
+    global last_saved_filename
+    t = text.get(0.0, tk.END)
+    f = open(last_saved_filename, 'w')
+    f.write(t)
+    f.close()
+    if filename != last_saved_filename:
+        os.rename(last_saved_filename, filename)
+    
+def save_as():
+    global filename
+    f = asksaveasfile(mode='w', defaultextension=".txt")
+    t = text.get(0.0, tk.END)
+    try:
+        f.write(t.rstrip())
+    except:
+        showerror(title="Oops!", message="Unable to save file...")
+    if f:
+        filename = f.name
+
+
+
+
+
 
 def change_font(changed_font):
     global font
@@ -105,22 +143,6 @@ def zoom_out(event=None):
         return
     font_size -= max(2, int(font_size / 10))
     text.config(font=(font, font_size))
-
-def save_file():
-    global filename
-    t = text.get(0.0, tk.END)
-    f= open(filename, 'w')
-    f.write(t)
-    f.close()
-    
-def save_as():
-    filename = None
-    f = asksaveasfile(mode='w', defaultextension=".txt")
-    t = text.get(0.0, tk.END)
-    try:
-        f.write(t.rstrip())
-    except:
-        showerror(title="Oops!", message="Unable to save file...")
 
 def undo():
     try:
@@ -168,8 +190,8 @@ def shortcuts():
         ("Cut", "Ctrl + X"),
         ("Copy", "Ctrl + C"),
         ("Paste", "Ctrl + V"),
-        ("Zoom In", "Ctrl + +"),
-        ("Zoom Out", "Ctrl + -"),
+        ("Zoom In", "Ctrl + 8"),
+        ("Zoom Out", "Ctrl + 9"),
         ("Reset Zoom", "Ctrl + 0"),
     ]
     for row, (action, shortcut) in enumerate(shortcuts, start = 1):
