@@ -5,35 +5,26 @@ from tkinter.messagebox import showinfo, showerror, askyesnocancel
 
 filename = None
 filepath = None
-last_saved_filename = None
+user_filepath = None
 change_name_to = None
 font = "Arial"
-
 current_mode = "dark"
-
 light_color = "#E4E4E4"
 dark_color = "#303030"
+
+save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Text Party Saves")
+os.makedirs(save_folder, exist_ok=True)
 
 root = tk.Tk()
 
 screen_height = root.winfo_screenheight()
-font_size = screen_height / 80
+font_size = int(screen_height / 80)
 
 text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=True, maxundo=-1)
 text.pack()
 text.edit_separator()
 
-
-
-
-
-
-
-
-
-
-
-def is_file_saved(): ###########
+def is_file_saved():
     global filename
     if filename is None or filename == "Untitled":
         return False
@@ -45,11 +36,10 @@ def is_file_saved(): ###########
     except (FileNotFoundError, OSError):
         return False
 
-def save_file_popup(): ###########
+def save_file_popup():
     answer = askyesnocancel("Save File", "Do you want to save the file? It is currently unsaved.")
     match answer:
         case True:
-            save_as()
             save_file()
             return True
         case False:
@@ -57,7 +47,7 @@ def save_file_popup(): ###########
         case None:
             return False
 
-def new_file(): ############
+def new_file():
     if (not is_file_saved()) and text.get("1.0", tk.END).strip():
         continue_forward = save_file_popup()
         if continue_forward:
@@ -65,22 +55,21 @@ def new_file(): ############
         else:
             return
     global filename
-    global last_saved_filename
     filename = "Untitled"
-    last_saved_filename = filename
     text.delete(0.0, tk.END)
 
 new_file()
 
 def open_file():
     global filename
+    global user_filepath
+    global filepath
     if not is_file_saved() and text.get("1.0", tk.END).strip():
         continue_forward = save_file_popup()
         if continue_forward:
             pass
         else:
             return
-    
     try:
         f = askopenfile(mode='r')
     except:
@@ -92,34 +81,55 @@ def open_file():
         f.close()
         text.delete(0.0, tk.END)
         text.insert(0.0, t)     
-        filename = f.name   
+        user_filepath = f.name
+        filename = os.path.basename(f.name)
+        filepath = os.path.join(save_folder, filename)
 
 def save_file():
     global filename
-    global last_saved_filename
-    t = text.get(0.0, tk.END)
-    f = open(last_saved_filename, 'w')
-    f.write(t)
-    f.close()
-    if filename != last_saved_filename:
-        os.rename(last_saved_filename, filename)
+    global filepath
+    global user_filepath
+    if user_filepath == None:
+        save_as()
+        return
+    try:
+        t = text.get(0.0, tk.END)
+        f = open(filepath, 'w')
+        f.write(t)
+        f.close()
+    except:
+        pass
+    try:
+        t = text.get(0.0, tk.END)
+        f = open(user_filepath, 'w')
+        f.write(t)
+        f.close()
+    except:
+        pass
     
-def save_as():
+def save_as(): 
     global filename
-    f = asksaveasfile(mode='w', defaultextension=".txt")
+    global filepath
+    global user_filepath
+    f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder)
+    if f is None:
+        return
     t = text.get(0.0, tk.END)
     try:
         f.write(t.rstrip())
     except:
         showerror(title="Oops!", message="Unable to save file...")
     if f:
-        filename = f.name
-
-
-
-
-
-
+        user_filepath = f.name
+        filename = os.path.basename(f.name)
+        filepath = os.path.join(save_folder, filename)
+    if user_filepath != filepath:
+        try:
+            with open(filepath, "w") as backup:
+                backup.write(t)
+        except OSError:
+            showerror(title="Ooops", message="Unable to create backup!")
+    
 def change_font(changed_font):
     global font
     font = changed_font
@@ -185,6 +195,7 @@ def shortcuts():
         ("New File", "Ctrl + N"),
         ("Open File", "Ctrl + O"),
         ("Save File", "Ctrl + S"),
+        ("Save As", "Ctrl + Shift + S"),
         ("Undo", "Ctrl + Z"),
         ("Redo", "Ctrl + Y"),
         ("Cut", "Ctrl + X"),
@@ -205,6 +216,7 @@ root.title("Text Editor")
 root.minsize(width=400, height=400)
 root.maxsize(width=2560, height=1440)
 root.bind("<Control-s>", lambda event: save_file())
+root.bind("<Control-Shift-s>", lambda event: save_as())
 root.bind("<Control-n>", lambda event: new_file())
 root.bind("<Control-o>", lambda event: open_file())
 root.bind("<Control-z>", lambda event: undo())
@@ -279,6 +291,6 @@ root.config(menu=menubar)
 
 root.mainloop()
 
-# Save confirmation before new and open file, Auto Save, Dynamic Window name is in progress,
+# Auto Save, Dynamic Window name is in progress,
 
 # Bold, Italic, Underline, Alinging, Encoding, Searching and Replacing, Word Count can be added in the future updates.
