@@ -29,7 +29,7 @@ def is_file_saved():
     if filename is None or filename == "Untitled":
         return False
     try:
-        with open(filename, "r") as f:
+        with open(filepath, "r") as f:
             saved_text = f.read()
         current_text = text.get("1.0", tk.END)
         return current_text == saved_text
@@ -48,7 +48,7 @@ def save_file_popup():
             return False
 
 def new_file():
-    if (not is_file_saved()) and text.get("1.0", tk.END).strip():
+    if text.get("1.0", tk.END).strip() != "" and is_file_saved() == False:
         continue_forward = save_file_popup()
         if continue_forward:
             pass
@@ -64,7 +64,7 @@ def open_file():
     global filename
     global user_filepath
     global filepath
-    if not is_file_saved() and text.get("1.0", tk.END).strip():
+    if text.get("1.0", tk.END).strip() == "" and is_file_saved() == False:
         continue_forward = save_file_popup()
         if continue_forward:
             pass
