@@ -2,9 +2,10 @@ import tkinter as tk
 import os
 from tkinter.filedialog import askopenfile, asksaveasfile
 from tkinter.messagebox import showinfo, showerror, askyesnocancel
+from datetime import datetime
 
 filename = None
-filepath = None
+backup_filepath = None
 user_filepath = None
 font = "Arial"
 current_mode = "dark"
@@ -24,12 +25,14 @@ text.pack()
 text.edit_separator()
 
 def is_file_saved():
-    if filename is None or filename == "Untitled":
+    if filename is None or filename == "Untitled" or backup_filepath is None:
         return False
     try:
-        with open(filepath, "r") as f:
+        if not os.path.exists(backup_filepath):
+            return False
+        with open(backup_filepath, "r") as f:
             saved_text = f.read()
-        current_text = text.get("1.0", tk.END)
+        current_text = text.get("1.0", "end-1c")  # Remove trailing newline
         return current_text == saved_text
     except (FileNotFoundError, OSError, TypeError):
         return False
@@ -50,7 +53,7 @@ def set_window_name(name: str):
     root.title(title)
 
 def new_file():
-    global filepath
+    global backup_filepath
     global user_filepath
     if text.get("1.0", tk.END).strip() != "" and is_file_saved() == False:
         continue_forward = save_file_popup()
@@ -61,7 +64,7 @@ def new_file():
     global filename
     set_window_name("Untitled")
     filename = "Untitled"
-    filepath = None
+    backup_filepath = None
     user_filepath = None
     text.delete(0.0, tk.END)
 
@@ -71,7 +74,7 @@ set_window_name("Untitled")
 def open_file():
     global filename
     global user_filepath
-    global filepath
+    global backup_filepath
     if text.get("1.0", tk.END).strip() != "" and is_file_saved() == False:
         continue_forward = save_file_popup()
         if continue_forward:
@@ -92,36 +95,42 @@ def open_file():
             user_filepath = f.name
             filename = os.path.basename(f.name)
             set_window_name(os.path.basename(f.name))
-            filepath = os.path.join(save_folder, filename)
+            backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
+            try:
+                with open(backup_filepath, 'w') as backup_file:
+                    backup_file.write(t)
+            except OSError:
+                showerror("Backup Failed", "Could not create backup file!")
 
 def save_file():
     global filename
-    global filepath
+    global backup_filepath
     global user_filepath
     if user_filepath == None:
         return save_as()
     t = text.get("1.0", tk.END)
-    try:
-        f = open(filepath, 'w')
-        f.write(t)
-        f.close()
-    except OSError as e:
-        showerror("Save Failed", str(e))
     try:
         f = open(user_filepath, 'w')
         f.write(t)
         f.close()
     except OSError as e:
         showerror("Save Failed", str(e))
-
-
+    try:
+        backup_path = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
+        with open(backup_path, 'w') as backup_file:
+            backup_file.write(t)
+        backup_filepath = backup_path
+    except OSError as e:
+        showerror("Save Failed", str(e))
+    
 def autosave():
-    if user_filepath != "":
+    if user_filepath is not None:
         save_file()
+    root.after(120000, autosave)
 
 def save_as(): 
     global filename
-    global filepath
+    global backup_filepath
     global user_filepath
     f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder)
     if f is None:
@@ -136,13 +145,12 @@ def save_as():
         user_filepath = f.name
         set_window_name(os.path.basename(f.name))
         filename = os.path.basename(f.name)
-        filepath = os.path.join(save_folder, filename)
-    if user_filepath != filepath:
-        try:
-            with open(filepath, "w") as backup:
-                backup.write(t)
-        except OSError:
-            showerror(title="Ooops", message="Unable to create backup!")
+    try:
+        backup_backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
+        with open(backup_filepath, 'w') as backup_file:
+            backup_file.write(t)
+    except OSError:
+        showerror(title="Backup Failed", message="Unable to create backup!")
     return True
     
 def change_font(changed_font):
@@ -248,7 +256,7 @@ root.bind("<Control-v>", lambda event: text.event_generate("<<Paste>>"))
 root.bind("<Control-0>", lambda event: text.config(font=(font, font_size)))
 root.bind("<Control-8>", zoom_in)
 root.bind("<Control-9>", zoom_out)
-root.after(60000, autosave)
+root.after(120000, autosave)
 
 menubar = tk.Menu(root, font=("Arial", int(screen_width / 10)))
 filemenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
@@ -312,8 +320,6 @@ menubar.add_cascade(label="Help", menu=aboutmenu)
 root.config(menu=menubar)
 
 root.mainloop()
-
-# Auto Save is in progress,
 
 # Bold, Italic, Underline, Alinging, Encoding, Searching and Replacing, Word Count can be added in the future updates.
 
