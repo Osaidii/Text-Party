@@ -45,6 +45,10 @@ def save_file_popup():
         case None:
             return False
 
+def set_window_name(name: str):
+    title = f"{name} | Text Party"
+    root.title(title)
+
 def new_file():
     global filepath
     global user_filepath
@@ -55,12 +59,14 @@ def new_file():
         else:
             return
     global filename
+    set_window_name("Untitled")
     filename = "Untitled"
     filepath = None
     user_filepath = None
     text.delete(0.0, tk.END)
 
 new_file()
+set_window_name("Untitled")
 
 def open_file():
     global filename
@@ -85,6 +91,7 @@ def open_file():
             text.insert(0.0, t)     
             user_filepath = f.name
             filename = os.path.basename(f.name)
+            set_window_name(os.path.basename(f.name))
             filepath = os.path.join(save_folder, filename)
 
 def save_file():
@@ -106,7 +113,12 @@ def save_file():
         f.close()
     except OSError as e:
         showerror("Save Failed", str(e))
-    
+
+
+def autosave():
+    if user_filepath != "":
+        save_file()
+
 def save_as(): 
     global filename
     global filepath
@@ -122,6 +134,7 @@ def save_as():
         showerror(title="Oops!", message="Unable to save file...")
     if f:
         user_filepath = f.name
+        set_window_name(os.path.basename(f.name))
         filename = os.path.basename(f.name)
         filepath = os.path.join(save_folder, filename)
     if user_filepath != filepath:
@@ -221,7 +234,6 @@ def on_close():
 screen_width = root.winfo_screenwidth()
 screen_height = root.winfo_screenheight()
 
-root.title("Text Editor")
 root.minsize(width=400, height=400)
 root.protocol("WM_DELETE_WINDOW", on_close)
 root.bind("<Control-s>", lambda event: save_file())
@@ -236,6 +248,7 @@ root.bind("<Control-v>", lambda event: text.event_generate("<<Paste>>"))
 root.bind("<Control-0>", lambda event: text.config(font=(font, font_size)))
 root.bind("<Control-8>", zoom_in)
 root.bind("<Control-9>", zoom_out)
+root.after(60000, autosave)
 
 menubar = tk.Menu(root, font=("Arial", int(screen_width / 10)))
 filemenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
@@ -300,6 +313,8 @@ root.config(menu=menubar)
 
 root.mainloop()
 
-# Auto Save, Dynamic Window name is in progress,
+# Auto Save is in progress,
 
 # Bold, Italic, Underline, Alinging, Encoding, Searching and Replacing, Word Count can be added in the future updates.
+
+# Things that could cause bugs: save name files saved in text party saves as backup
