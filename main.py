@@ -6,7 +6,6 @@ from tkinter.messagebox import showinfo, showerror, askyesnocancel
 filename = None
 filepath = None
 user_filepath = None
-change_name_to = None
 font = "Arial"
 current_mode = "dark"
 light_color = "#E4E4E4"
@@ -25,7 +24,6 @@ text.pack()
 text.edit_separator()
 
 def is_file_saved():
-    global filename
     if filename is None or filename == "Untitled":
         return False
     try:
@@ -33,7 +31,7 @@ def is_file_saved():
             saved_text = f.read()
         current_text = text.get("1.0", tk.END)
         return current_text == saved_text
-    except (FileNotFoundError, OSError):
+    except (FileNotFoundError, OSError, TypeError):
         return False
 
 def save_file_popup():
@@ -48,6 +46,8 @@ def save_file_popup():
             return False
 
 def new_file():
+    global filepath
+    global user_filepath
     if text.get("1.0", tk.END).strip() != "" and is_file_saved() == False:
         continue_forward = save_file_popup()
         if continue_forward:
@@ -56,6 +56,8 @@ def new_file():
             return
     global filename
     filename = "Untitled"
+    filepath = None
+    user_filepath = None
     text.delete(0.0, tk.END)
 
 new_file()
@@ -64,7 +66,7 @@ def open_file():
     global filename
     global user_filepath
     global filepath
-    if text.get("1.0", tk.END).strip() == "" and is_file_saved() == False:
+    if text.get("1.0", tk.END).strip() != "" and is_file_saved() == False:
         continue_forward = save_file_popup()
         if continue_forward:
             pass
@@ -77,35 +79,33 @@ def open_file():
         return
     filename = None
     if f:
-        t = f.read()
-        f.close()
-        text.delete(0.0, tk.END)
-        text.insert(0.0, t)     
-        user_filepath = f.name
-        filename = os.path.basename(f.name)
-        filepath = os.path.join(save_folder, filename)
+        with f:
+            t = f.read()
+            text.delete(0.0, tk.END)
+            text.insert(0.0, t)     
+            user_filepath = f.name
+            filename = os.path.basename(f.name)
+            filepath = os.path.join(save_folder, filename)
 
 def save_file():
     global filename
     global filepath
     global user_filepath
     if user_filepath == None:
-        save_as()
-        return
+        return save_as()
+    t = text.get("1.0", tk.END)
     try:
-        t = text.get(0.0, tk.END)
         f = open(filepath, 'w')
         f.write(t)
         f.close()
-    except:
-        pass
+    except OSError as e:
+        showerror("Save Failed", str(e))
     try:
-        t = text.get(0.0, tk.END)
         f = open(user_filepath, 'w')
         f.write(t)
         f.close()
-    except:
-        pass
+    except OSError as e:
+        showerror("Save Failed", str(e))
     
 def save_as(): 
     global filename
@@ -113,10 +113,11 @@ def save_as():
     global user_filepath
     f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder)
     if f is None:
-        return
+        return False
     t = text.get(0.0, tk.END)
     try:
-        f.write(t.rstrip())
+        f.write(t)
+        f.close()
     except:
         showerror(title="Oops!", message="Unable to save file...")
     if f:
@@ -129,6 +130,7 @@ def save_as():
                 backup.write(t)
         except OSError:
             showerror(title="Ooops", message="Unable to create backup!")
+    return True
     
 def change_font(changed_font):
     global font
@@ -209,12 +211,19 @@ def shortcuts():
         tk.Label(window, text=action, font=("Arial", 12)).grid(row=row, column=0, padx=20, pady=5)
         tk.Label(window, text=shortcut, font=("Arial", 12)).grid(row=row, column=1, padx=20, pady=5)
 
+def on_close():
+    if text.get("1.0", "end-1c").strip() != "":
+        if not is_file_saved():
+            if not save_file_popup():
+                return
+    root.destroy()
+
 screen_width = root.winfo_screenwidth()
 screen_height = root.winfo_screenheight()
 
 root.title("Text Editor")
 root.minsize(width=400, height=400)
-root.maxsize(width=2560, height=1440)
+root.protocol("WM_DELETE_WINDOW", on_close)
 root.bind("<Control-s>", lambda event: save_file())
 root.bind("<Control-Shift-s>", lambda event: save_as())
 root.bind("<Control-n>", lambda event: new_file())
@@ -235,7 +244,7 @@ filemenu.add_command(label="Open", command=open_file)
 filemenu.add_command(label="Save", command=save_file)
 filemenu.add_command(label="Save As...", command=save_as)
 filemenu.add_separator()
-filemenu.add_command(label="Quit", command=root.quit)
+filemenu.add_command(label="Quit", command=on_close )
 menubar.add_cascade(label="File", menu=filemenu)
 editmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 editmenu.add_command(label="Undo", command=undo) 
