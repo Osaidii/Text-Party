@@ -3,12 +3,14 @@ import os
 from tkinter.filedialog import askopenfile, asksaveasfile
 from tkinter.messagebox import showinfo, showerror, askyesnocancel
 from datetime import datetime
+import sys
 
 filename = None
 user_filepath = None
 backup_filename = None
 backup_filepath = None
 server_filepath = None
+in_party = False
 font = "Arial"
 current_mode = "dark"
 light_color = "#E4E4E4"
@@ -25,6 +27,10 @@ font_size = int(screen_height / 80)
 text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=True, maxundo=-1)
 text.pack()
 text.edit_separator()
+
+
+
+# # # # #     Editor Functions
 
 def is_file_saved():
     if filename is None or filename == "Untitled" or backup_filepath is None:
@@ -211,14 +217,10 @@ def change_mode_to_dark():
 def about():
     showinfo(title="About", message="This is Text Party, a simple text editor where you can invite your friends or colleagues to collaborate in one single file.\n\nCreated by: Osaidii (Muhammad Osaid Hassan)\nVersion: 1.0\n\nFor more information, visit: https://github.com/Osaidii/text-party")
 
-def about_party():
-    showinfo(title="About Party", message="A Party can be described as a huddle or a group or a room which when setup, can allow other invited members to edit and update the same text file.")
-
-
 def shortcuts():
     window = tk.Toplevel(root)
     window.title("Shortcuts")
-    window.geometry("250x475")
+    window.geometry("275x635")
     window.resizable(False, False)
     tk.Label(window, text="Actions", font=("Arial", 12)).grid(row=0, column=0, padx=20, pady=10)
     tk.Label(window, text="Shortcuts", font=("Arial", 12)).grid(row=0, column=1, padx=20, pady=10)
@@ -236,6 +238,10 @@ def shortcuts():
         ("Zoom In", "Ctrl + 8"),
         ("Zoom Out", "Ctrl + 9"),
         ("Reset Zoom", "Ctrl + 0"),
+        ("Invite", "Ctrl + I"),
+        ("Remove", "Ctrl + R"),
+        ("Join", "Ctrl + J"),
+        ("Leave", "Ctrl + L"),
     ]
     for row, (action, shortcut) in enumerate(shortcuts, start = 1):
         tk.Label(window, text=action, font=("Arial", 12)).grid(row=row, column=0, padx=20, pady=5)
@@ -248,6 +254,34 @@ def on_close():
                 return
     root.destroy()
 
+
+
+# # # # #     Party Functions
+
+def about_party():
+    showinfo(title="About Party", message="A Party can be described as a group or a room which when used, can allow other invited members to edit and update the same text file.")
+
+def invite():
+    pass
+
+def remove():
+    pass
+
+def join():
+    global in_party
+    in_party = True
+
+def leave():
+    global in_party
+    in_party = False
+
+def update_text():
+    pass
+
+
+
+# # # # #     Software Loop
+
 screen_width = root.winfo_screenwidth()
 screen_height = root.winfo_screenheight()
 
@@ -259,15 +293,20 @@ root.bind("<Control-n>", lambda event: new_file())
 root.bind("<Control-o>", lambda event: open_file())
 root.bind("<Control-z>", lambda event: undo())
 root.bind("<Control-y>", lambda event: redo())
-root.bind("<Control-x>", lambda event: text.event_generate("<<Cut>>"))
-root.bind("<Control-c>", lambda event: text.event_generate("<<Copy>>"))
-root.bind("<Control-v>", lambda event: text.event_generate("<<Paste>>"))
-root.bind("<Control-0>", lambda event: text.config(font=(font, font_size)))
-root.bind("<Control-8>", zoom_in)
-root.bind("<Control-9>", zoom_out)
+root.bind("<Control-i>", lambda event: invite())
+root.bind("<Control-r>", lambda event: remove())
+root.bind("<Control-j>", lambda event: join())
+root.bind("<Control-l>", lambda event: leave())
+text.bind("<Control-x>", lambda event: text.event_generate("<<Cut>>"))
+text.bind("<Control-c>", lambda event: text.event_generate("<<Copy>>"))
+text.bind("<Control-v>", lambda event: text.event_generate("<<Paste>>"))
+text.bind("<Control-0>", lambda event: text.config(font=(font, font_size)))
+text.bind("<Control-8>", zoom_in)
+text.bind("<Control-9>", zoom_out)
+text.bind("<<Modified>>", update_text)
 root.after(120000, autosave)
 
-menubar = tk.Menu(root, font=("Arial", int(screen_width / 10)))
+menubar = tk.Menu(root, font=("Arial"))
 filemenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 filemenu.add_command(label="New", command=new_file) 
 filemenu.add_command(label="Open", command=open_file)
@@ -287,7 +326,11 @@ menubar.add_cascade(label="Edit", menu=editmenu)
 partymenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 partymenu.add_command(label="About", command=about_party) 
 partymenu.add_separator()
-partymenu.add_command(label="Temp", command=redo)
+partymenu.add_separator
+partymenu.add_command(label="Invite", command=invite)
+partymenu.add_command(label="Remove", command=remove)
+partymenu.add_command(label="Join", command=join)
+partymenu.add_command(label="Leave", command=leave)
 menubar.add_cascade(label="Party", menu=partymenu)
 fontmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 fontmenu.add_command(label="Arial", command=lambda: change_font("Arial"))
