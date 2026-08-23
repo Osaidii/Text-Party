@@ -5,8 +5,10 @@ from tkinter.messagebox import showinfo, showerror, askyesnocancel
 from datetime import datetime
 
 filename = None
-backup_filepath = None
 user_filepath = None
+backup_filename = None
+backup_filepath = None
+server_filepath = None
 font = "Arial"
 current_mode = "dark"
 light_color = "#E4E4E4"
@@ -32,7 +34,7 @@ def is_file_saved():
             return False
         with open(backup_filepath, "r") as f:
             saved_text = f.read()
-        current_text = text.get("1.0", "end-1c")  # Remove trailing newline
+        current_text = text.get("1.0", "end-1c")
         return current_text == saved_text
     except (FileNotFoundError, OSError, TypeError):
         return False
@@ -52,10 +54,13 @@ def set_window_name(name: str):
     title = f"{name} | Text Party"
     root.title(title)
 
+def server_file_and_path():
+    pass
+
 def new_file():
     global backup_filepath
     global user_filepath
-    if text.get("1.0", tk.END).strip() != "" and is_file_saved() == False:
+    if text.get("1.0", "end-1c").strip() != "" and is_file_saved() == False:
         continue_forward = save_file_popup()
         if continue_forward:
             pass
@@ -75,18 +80,11 @@ def open_file():
     global filename
     global user_filepath
     global backup_filepath
-    if text.get("1.0", tk.END).strip() != "" and is_file_saved() == False:
+    if text.get("1.0", "end-1c").strip() != "" and not is_file_saved():
         continue_forward = save_file_popup()
-        if continue_forward:
-            pass
-        else:
+        if not continue_forward:
             return
-    try:
-        f = askopenfile(mode='r')
-    except:
-        showerror(title = "Failed", message = "Failed to Open File, maybe the file was altered, or maybe just try again")
-        return
-    filename = None
+    f = askopenfile(mode='r')
     if f:
         with f:
             t = f.read()
@@ -96,6 +94,7 @@ def open_file():
             filename = os.path.basename(f.name)
             set_window_name(os.path.basename(f.name))
             backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
+            # here
             try:
                 with open(backup_filepath, 'w') as backup_file:
                     backup_file.write(t)
@@ -105,21 +104,24 @@ def open_file():
 def save_file():
     global filename
     global backup_filepath
+    global backup_filename
     global user_filepath
-    if user_filepath == None:
+    if user_filepath is None:
         return save_as()
-    t = text.get("1.0", tk.END)
+    t = text.get("1.0", "end-1c")
     try:
-        f = open(user_filepath, 'w')
-        f.write(t)
-        f.close()
+        with open(user_filepath, "w") as f:
+            f.write(t)
     except OSError as e:
         showerror("Save Failed", str(e))
     try:
-        backup_path = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
-        with open(backup_path, 'w') as backup_file:
+        with open(backup_filepath, 'w') as backup_file:
             backup_file.write(t)
-        backup_filepath = backup_path
+        current_name = backup_filepath
+        backup_filename = f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}"
+        new_filepath = os.path.join(os.path.dirname(backup_filepath), backup_filename)
+        os.rename(current_name, new_filepath)
+        backup_filepath = new_filepath
     except OSError as e:
         showerror("Save Failed", str(e))
     
@@ -132,21 +134,24 @@ def save_as():
     global filename
     global backup_filepath
     global user_filepath
+    global backup_filename
     f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder)
     if f is None:
         return False
-    t = text.get(0.0, tk.END)
+    t = text.get(0.0, "end-1c")
     try:
         f.write(t)
         f.close()
     except:
         showerror(title="Oops!", message="Unable to save file...")
+        return False
     if f:
         user_filepath = f.name
         set_window_name(os.path.basename(f.name))
         filename = os.path.basename(f.name)
     try:
-        backup_backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
+        backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
+        backup_filename = os.path.basename(backup_filepath)
         with open(backup_filepath, 'w') as backup_file:
             backup_file.write(t)
     except OSError:
@@ -205,6 +210,10 @@ def change_mode_to_dark():
 
 def about():
     showinfo(title="About", message="This is Text Party, a simple text editor where you can invite your friends or colleagues to collaborate in one single file.\n\nCreated by: Osaidii (Muhammad Osaid Hassan)\nVersion: 1.0\n\nFor more information, visit: https://github.com/Osaidii/text-party")
+
+def about_party():
+    showinfo(title="About Party", message="A Party can be described as a huddle or a group or a room which when setup, can allow other invited members to edit and update the same text file.")
+
 
 def shortcuts():
     window = tk.Toplevel(root)
@@ -275,6 +284,11 @@ editmenu.add_command(label="Cut", command=lambda: text.event_generate("<<Cut>>")
 editmenu.add_command(label="Copy", command=lambda: text.event_generate("<<Copy>>"))
 editmenu.add_command(label="Paste", command=lambda: text.event_generate("<<Paste>>"))
 menubar.add_cascade(label="Edit", menu=editmenu)
+partymenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
+partymenu.add_command(label="About", command=about_party) 
+partymenu.add_separator()
+partymenu.add_command(label="Temp", command=redo)
+menubar.add_cascade(label="Party", menu=partymenu)
 fontmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 fontmenu.add_command(label="Arial", command=lambda: change_font("Arial"))
 fontmenu.add_command(label="Times New Roman", command=lambda: change_font("Times New Roman"))
@@ -322,5 +336,3 @@ root.config(menu=menubar)
 root.mainloop()
 
 # Bold, Italic, Underline, Alinging, Encoding, Searching and Replacing, Word Count can be added in the future updates.
-
-# Things that could cause bugs: save name files saved in text party saves as backup
