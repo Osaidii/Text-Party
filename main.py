@@ -3,18 +3,23 @@ import os
 from tkinter.filedialog import askopenfile, asksaveasfile
 from tkinter.messagebox import showinfo, showerror, askyesnocancel
 from datetime import datetime
-import sys
+import json
+import socket
+import time
 
 filename = None
 user_filepath = None
 backup_filename = None
 backup_filepath = None
 server_filepath = None
+party_mode = False
 in_party = False
 font = "Arial"
 current_mode = "dark"
 light_color = "#E4E4E4"
 dark_color = "#303030"
+
+conn = None
 
 save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Text Party Saves")
 os.makedirs(save_folder, exist_ok=True)
@@ -261,6 +266,23 @@ def on_close():
 def about_party():
     showinfo(title="About Party", message="A Party can be described as a group or a room which when used, can allow other invited members to edit and update the same text file.")
 
+def start_party():
+    global party_mode
+    party_name = tk.simpledialog.askstring(title="Party Name",prompt="Enter name for Party?:", parent=root)
+    party_password = ""
+    if party_name is not None:
+        party_password = tk.simpledialog.askstring(title="Party Password",prompt="Enter password for Party?:", parent=root)
+        if party_password != "":
+            party_mode = True
+    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    conn.connect(("text-party.osaidii.hackclub.app", 3467))
+    request = {"action": "create", "filename": party_name}
+    conn.sendall(json.dumps(request).encode())
+
+def stop_party():
+    global party_mode
+    party_mode = False 
+
 def invite():
     pass
 
@@ -327,6 +349,8 @@ partymenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#5555
 partymenu.add_command(label="About", command=about_party) 
 partymenu.add_separator()
 partymenu.add_separator
+partymenu.add_command(label="Start Party", command=start_party)
+partymenu.add_command(label="Stop Party", command=stop_party)
 partymenu.add_command(label="Invite", command=invite)
 partymenu.add_command(label="Remove", command=remove)
 partymenu.add_command(label="Join", command=join)
