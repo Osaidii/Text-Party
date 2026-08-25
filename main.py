@@ -2,6 +2,7 @@ import tkinter as tk
 import os
 from tkinter.filedialog import askopenfile, asksaveasfile
 from tkinter.messagebox import showinfo, showerror, askyesnocancel
+from tkinter import simpledialog
 from datetime import datetime
 import json
 import socket
@@ -13,11 +14,13 @@ backup_filename = None
 backup_filepath = None
 server_filepath = None
 party_mode = False
-in_party = False
 font = "Arial"
 current_mode = "dark"
 light_color = "#E4E4E4"
 dark_color = "#303030"
+
+party_name = None
+party_password = None
 
 conn = None
 
@@ -105,7 +108,6 @@ def open_file():
             filename = os.path.basename(f.name)
             set_window_name(os.path.basename(f.name))
             backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
-            # here
             try:
                 with open(backup_filepath, 'w') as backup_file:
                     backup_file.write(t)
@@ -268,20 +270,43 @@ def about_party():
 
 def start_party():
     global party_mode
-    party_name = tk.simpledialog.askstring(title="Party Name",prompt="Enter name for Party?:", parent=root)
+    global party_name
+    global party_password
+    global conn
+    party_name = simpledialog.askstring(title="Party Name",prompt="Enter a unique name for Party?:", parent=root)
+    if party_name == None:
+        return
     party_password = ""
     if party_name is not None:
-        party_password = tk.simpledialog.askstring(title="Party Password",prompt="Enter password for Party?:", parent=root)
+        party_password = simpledialog.askstring(title="Party Password",prompt="Enter password for Party?:", parent=root)
+        if party_password == None:
+                return
         if party_password != "":
             party_mode = True
-    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    conn.connect(("text-party.osaidii.hackclub.app", 3467))
-    request = {"action": "create", "filename": party_name}
-    conn.sendall(json.dumps(request).encode())
+    try:
+        conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        conn.connect(("text-party.osaidii.hackclub.app", 3467))
+    except OSError as e:
+        showerror("Connection Failed", f"Couldn't reach the party server:\n{e}")
+        conn = None
+        return
+    request = {"action": "create", "partyname": party_name, "partypassword": party_password,"text": text.get("1.0", "end-1c")}
+    conn.sendall(json.dumps(request).encode())  
 
 def stop_party():
     global party_mode
-    party_mode = False 
+    global conn
+    if conn is None:
+        party_mode = False
+        return
+    try:
+        request = {"action": "destroy", "partyname": party_name, "partypassword": party_password}
+        conn.sendall(json.dumps(request).encode())
+    except OSError:
+        pass
+    conn.close()
+    conn = None
+    party_mode = False
 
 def invite():
     pass
@@ -290,15 +315,22 @@ def remove():
     pass
 
 def join():
-    global in_party
-    in_party = True
+    pass
 
 def leave():
-    global in_party
-    in_party = False
+    pass
 
 def update_text():
-    pass
+    text.edit_modified(False)
+    global conn
+    if conn is None or not party_mode:
+        return
+    try:
+        request = {"action": "update", "partyname": party_name, "partypassword": party_password, "text": text.get("1.0", "end-1c")}
+        conn.sendall(json.dumps(request).encode())
+    except OSError:
+        showerror("Connection Lost", "Disconnected from the party server.")
+        conn = None
 
 
 
@@ -403,3 +435,5 @@ root.config(menu=menubar)
 root.mainloop()
 
 # Bold, Italic, Underline, Alinging, Encoding, Searching and Replacing, Word Count can be added in the future updates.
+
+# Bug with server domain becuase of nest's reverse proxy
