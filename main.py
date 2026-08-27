@@ -5,8 +5,10 @@ from tkinter.messagebox import showinfo, showerror, askyesnocancel
 from tkinter import simpledialog
 from datetime import datetime
 import json
-import socket
-import time
+import asyncio
+import websockets
+
+clients = set() 
 
 filename = None
 user_filepath = None
@@ -284,14 +286,13 @@ def start_party():
         if party_password != "":
             party_mode = True
     try:
-        conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        conn.connect(("text-party.osaidii.hackclub.app", 3467))
+        conn = asyncio.run(websockets.connect("wss://text-party.osaidii.hackclub.app"))
     except OSError as e:
         showerror("Connection Failed", f"Couldn't reach the party server:\n{e}")
         conn = None
         return
     request = {"action": "create", "partyname": party_name, "partypassword": party_password,"text": text.get("1.0", "end-1c")}
-    conn.sendall(json.dumps(request).encode())  
+    asyncio.run(conn.close())  
 
 def stop_party():
     global party_mode
@@ -301,7 +302,7 @@ def stop_party():
         return
     try:
         request = {"action": "destroy", "partyname": party_name, "partypassword": party_password}
-        conn.sendall(json.dumps(request).encode())
+        asyncio.run(conn.close())
     except OSError:
         pass
     conn.close()
@@ -327,7 +328,7 @@ def update_text():
         return
     try:
         request = {"action": "update", "partyname": party_name, "partypassword": party_password, "text": text.get("1.0", "end-1c")}
-        conn.sendall(json.dumps(request).encode())
+        asyncio.run(conn.close())
     except OSError:
         showerror("Connection Lost", "Disconnected from the party server.")
         conn = None
