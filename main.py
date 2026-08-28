@@ -7,6 +7,7 @@ from datetime import datetime
 import json
 import asyncio
 import websockets
+import socket
 
 clients = set() 
 
@@ -20,10 +21,8 @@ font = "Arial"
 current_mode = "dark"
 light_color = "#E4E4E4"
 dark_color = "#303030"
-
 party_name = None
 party_password = None
-
 conn = None
 
 save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Text Party Saves")
@@ -74,15 +73,13 @@ def server_file_and_path():
     pass
 
 def new_file():
-    global backup_filepath
-    global user_filepath
+    global backup_filepath, user_filepath, filename
     if text.get("1.0", "end-1c").strip() != "" and is_file_saved() == False:
         continue_forward = save_file_popup()
         if continue_forward:
             pass
         else:
             return
-    global filename
     set_window_name("Untitled")
     filename = "Untitled"
     backup_filepath = None
@@ -93,9 +90,7 @@ new_file()
 set_window_name("Untitled")
 
 def open_file():
-    global filename
-    global user_filepath
-    global backup_filepath
+    global filename, user_filepath, backup_filepath
     if text.get("1.0", "end-1c").strip() != "" and not is_file_saved():
         continue_forward = save_file_popup()
         if not continue_forward:
@@ -117,10 +112,7 @@ def open_file():
                 showerror("Backup Failed", "Could not create backup file!")
 
 def save_file():
-    global filename
-    global backup_filepath
-    global backup_filename
-    global user_filepath
+    global filename, backup_filepath, backup_filename, user_filepath
     if user_filepath is None:
         return save_as()
     t = text.get("1.0", "end-1c")
@@ -146,10 +138,7 @@ def autosave():
     root.after(120000, autosave)
 
 def save_as(): 
-    global filename
-    global backup_filepath
-    global user_filepath
-    global backup_filename
+    global filename, backup_filepath, user_filepath, backup_filename
     f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder)
     if f is None:
         return False
@@ -209,19 +198,15 @@ def redo():
     except tk.TclError:
         pass
 
-def change_mode_to_light():
+def change_mode(change_to):
     global current_mode
-    if "Light" == current_mode:
+    if change_to == current_mode:
         return
-    text.config(bg=light_color, fg=dark_color)
-    current_mode = "Light"
-
-def change_mode_to_dark():
-    global current_mode
-    if "Dark" == current_mode:
-        return
-    text.config(fg=light_color, bg=dark_color) 
-    current_mode = "Dark"
+    if change_to == "Light":
+        text.config(bg=light_color, fg=dark_color)
+    if change_to == "Dark":
+        text.config(fg=light_color, bg=dark_color) 
+    current_mode = change_to
 
 def about():
     showinfo(title="About", message="This is Text Party, a simple text editor where you can invite your friends or colleagues to collaborate in one single file.\n\nCreated by: Osaidii (Muhammad Osaid Hassan)\nVersion: 1.0\n\nFor more information, visit: https://github.com/Osaidii/text-party")
@@ -271,10 +256,7 @@ def about_party():
     showinfo(title="About Party", message="A Party can be described as a group or a room which when used, can allow other invited members to edit and update the same text file.")
 
 def start_party():
-    global party_mode
-    global party_name
-    global party_password
-    global conn
+    global party_mode, party_name, party_mode, conn
     party_name = simpledialog.askstring(title="Party Name",prompt="Enter a unique name for Party?:", parent=root)
     if party_name == None:
         return
@@ -285,24 +267,23 @@ def start_party():
                 return
         if party_password != "":
             party_mode = True
+    request = {"action": "create", "partyname": party_name, "partypassword": party_password, "text": text.get("1.0", "end-1c")}
     try:
-        conn = asyncio.run(websockets.connect("wss://text-party.osaidii.hackclub.app"))
+        asyncio.run(_send(request))
+        conn = True
     except OSError as e:
         showerror("Connection Failed", f"Couldn't reach the party server:\n{e}")
         conn = None
         return
-    request = {"action": "create", "partyname": party_name, "partypassword": party_password,"text": text.get("1.0", "end-1c")}
-    asyncio.run(conn.close())  
 
 def stop_party():
-    global party_mode
-    global conn
+    global party_mode, conn
     if conn is None:
         party_mode = False
         return
     try:
         request = {"action": "destroy", "partyname": party_name, "partypassword": party_password}
-        asyncio.run(conn.close())
+        asyncio.run(_send(request))
     except OSError:
         pass
     conn.close()
@@ -321,19 +302,22 @@ def join():
 def leave():
     pass
 
-def update_text():
-    text.edit_modified(False)
+def update_text(event=None):
     global conn
+    text.edit_modified(False)
     if conn is None or not party_mode:
         return
     try:
         request = {"action": "update", "partyname": party_name, "partypassword": party_password, "text": text.get("1.0", "end-1c")}
-        asyncio.run(conn.close())
+        asyncio.run(_send(request))
     except OSError:
         showerror("Connection Lost", "Disconnected from the party server.")
         conn = None
 
-
+async def _send(request):
+    async with websockets.connect("wss://text-party.osaidii.hackclub.app") as ws:
+        request["filename"] = request.pop("partyname", party_name)
+        await ws.send(json.dumps(request))  
 
 # # # # #     Software Loop
 
@@ -390,41 +374,20 @@ partymenu.add_command(label="Join", command=join)
 partymenu.add_command(label="Leave", command=leave)
 menubar.add_cascade(label="Party", menu=partymenu)
 fontmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
-fontmenu.add_command(label="Arial", command=lambda: change_font("Arial"))
-fontmenu.add_command(label="Times New Roman", command=lambda: change_font("Times New Roman"))
-fontmenu.add_command(label="Courier New", command=lambda: change_font("Courier New"))
-fontmenu.add_command(label="Verdana", command=lambda: change_font("Verdana"))
-fontmenu.add_command(label="Tahoma", command=lambda: change_font("Tahoma"))
-fontmenu.add_command(label="Georgia", command=lambda: change_font("Georgia"))
-fontmenu.add_command(label="Trebuchet MS", command=lambda: change_font("Trebuchet MS"))
-fontmenu.add_command(label="Comic Sans MS", command=lambda: change_font("Comic Sans MS"))
-fontmenu.add_command(label="Impact", command=lambda: change_font("Impact"))
-fontmenu.add_command(label="Calibri", command=lambda: change_font("Calibri"))
-fontmenu.add_command(label="Consolas", command=lambda: change_font("Consolas"))
-fontmenu.add_command(label="Segoe UI", command=lambda: change_font("Segoe UI"))
+for font_name in ("Arial", "Times New Roman", "Courier New", "Verdana", "Tahoma", "Georgia", "Trebuchet MS", "Comic Sans MS", "Impact", "Calibri", "Consolas", "Segoe UI"):
+    fontmenu.add_command(label=font_name, command=lambda f=font_name: change_font(f))
 menubar.add_cascade(label="Font", menu=fontmenu)
 sizemenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
-sizemenu.add_command(label="8", command=lambda: change_font_size(8))
-sizemenu.add_command(label="10", command=lambda: change_font_size(10))
-sizemenu.add_command(label="12", command=lambda: change_font_size(12))
-sizemenu.add_command(label="14", command=lambda: change_font_size(14))
-sizemenu.add_command(label="16", command=lambda: change_font_size(16))
-sizemenu.add_command(label="18", command=lambda: change_font_size(18))
-sizemenu.add_command(label="20", command=lambda: change_font_size(20))
-sizemenu.add_command(label="24", command=lambda: change_font_size(24))
-sizemenu.add_command(label="32", command=lambda: change_font_size(32))
-sizemenu.add_command(label="40", command=lambda: change_font_size(40))
-sizemenu.add_command(label="48", command=lambda: change_font_size(48))
-sizemenu.add_command(label="56", command=lambda: change_font_size(56))
-sizemenu.add_command(label="70", command=lambda: change_font_size(70))
+for size in (8, 10, 12, 14, 16, 18, 20, 24, 32, 40, 48, 56, 70):
+    sizemenu.add_command(label=size, command=lambda s=size: change_font_size(s))
 menubar.add_cascade(label="Font Size", menu=sizemenu)
 viewmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 viewmenu.add_command(label="Zoom In", command=zoom_in)
 viewmenu.add_command(label="Zoom Out", command=zoom_out)
 viewmenu.add_command(label="Reset Zoom", command=lambda: text.config(font=(font, font_size)))
 viewmenu.add_separator()
-viewmenu.add_command(label="Light Mode", command=change_mode_to_light)
-viewmenu.add_command(label="Dark Mode", command=change_mode_to_dark)
+viewmenu.add_command(label="Light Mode", command=change_mode("Light"))
+viewmenu.add_command(label="Dark Mode", command=change_mode("Dark"))
 menubar.add_cascade(label="View", menu=viewmenu) 
 aboutmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 aboutmenu.add_command(label="About", command=about)
@@ -436,5 +399,3 @@ root.config(menu=menubar)
 root.mainloop()
 
 # Bold, Italic, Underline, Alinging, Encoding, Searching and Replacing, Word Count can be added in the future updates.
-
-# Bug with server domain becuase of nest's reverse proxy
