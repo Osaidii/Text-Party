@@ -110,7 +110,7 @@ def open_file():
             text.edit_reset()
             filename = os.path.basename(f.name)
             set_window_name(os.path.basename(f.name))
-            backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H:%M:%S %m-%d-%y')}")
+            backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
             try:
                 with open(backup_filepath, 'w') as backup_file:
                     backup_file.write(t)
@@ -131,7 +131,7 @@ def save_file():
         with open(backup_filepath, 'w') as backup_file:
             backup_file.write(t)
         current_name = backup_filepath
-        backup_filename = f"{filename} {datetime.now().strftime('%H:%M:%S %m-%d-%y')}"
+        backup_filename = f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}"
         new_filepath = os.path.join(os.path.dirname(backup_filepath), backup_filename)
         os.rename(current_name, new_filepath)
         backup_filepath = new_filepath
@@ -161,7 +161,7 @@ def save_as():
     set_window_name(os.path.basename(f.name))
     filename = os.path.basename(f.name)
     try:
-        backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H:%M:%S %m-%d-%y')}")
+        backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
         backup_filename = os.path.basename(backup_filepath)
         with open(backup_filepath, 'w') as backup_file:
             backup_file.write(t)
@@ -283,6 +283,7 @@ def start_party():
         party_mode = False
         return False
     party_mode = True
+    current_text = text.get("1.0", "end-1c")
     def worker():
         global conn, party_mode
         ip = get_public_ip()
@@ -290,7 +291,7 @@ def start_party():
             root.after(0, lambda: showerror("Connection Failed", "Couldn't get your public ip."))
             party_mode = False
             return
-        request = {"action": "create", "partyname": party_name, "partypassword": party_password, "members": [ip], "text": text.get("1.0", "end-1c")}
+        request = {"action": "create", "partyname": party_name, "partypassword": party_password, "members": [ip], "text": current_text}
         try:
             asyncio.run(_send(request))
             conn = True
