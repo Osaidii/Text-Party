@@ -273,7 +273,7 @@ def get_public_ip():
 def start_party():
     global party_mode, party_name, party_password, conn
     party_name = simpledialog.askstring(title="Party Name",prompt="Enter a unique name for Party?:", parent=root)
-    if party_name == None or party_mode == True:
+    if party_mode == True:
         return
     party_password = simpledialog.askstring(title="Party Password",prompt="Enter password for Party?:", parent=root)
     if party_password == "":
