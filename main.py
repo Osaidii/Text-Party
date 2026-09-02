@@ -10,19 +10,21 @@ import json
 import asyncio
 import websockets
 
-filename = None
-user_filepath = None
-backup_filename = None
-backup_filepath = None
+filename = ""
+user_filepath = ""
+backup_filename = ""
+backup_filepath = ""
 party_mode = False
-pending_update = None
+pending_update = ""
 font = "Arial"
 current_mode = "Dark"
 light_color = "#E4E4E4"
 dark_color = "#303030"
-party_name = None
-party_password = None
-conn = None
+party_name = ""
+party_password = ""
+conn = ""
+ip = "" 
+user_name = ""
 
 save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Text Party Saves")
 os.makedirs(save_folder, exist_ok=True)
@@ -43,7 +45,7 @@ text.edit_separator()
 # # # # #     Editor Functions
 
 def is_file_saved():
-    if filename is None or filename == "Untitled" or user_filepath is None:
+    if filename == "" or filename == "Untitled" or user_filepath == "":
         return False
     try:
         if not os.path.exists(user_filepath):
@@ -83,9 +85,9 @@ def new_file():
             return
     set_window_name("Untitled")
     filename = "Untitled"
-    backup_filepath = None
+    backup_filepath = ""
     text.edit_reset()
-    user_filepath = None
+    user_filepath = ""
     text.delete("1.0", tk.END)
 
 new_file()
@@ -119,7 +121,7 @@ def open_file():
 
 def save_file():
     global filename, backup_filepath, backup_filename, user_filepath
-    if user_filepath is None:
+    if user_filepath == "":
         return save_as()
     t = text.get("1.0", "end-1c")
     try:
@@ -141,14 +143,14 @@ def save_file():
 def autosave():
     if not root.winfo_exists():
         return
-    if user_filepath is not None:
+    if user_filepath != "":
         save_file()
     root.after(120000, autosave)
 
 def save_as(): 
     global filename, backup_filepath, user_filepath, backup_filename
     f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder)
-    if f is None:
+    if f == "":
         return False
     t = text.get("1.0", "end-1c")
     try:
@@ -216,7 +218,7 @@ def change_mode(change_to):
     current_mode = change_to
 
 def about():
-    showinfo(title="About", message="This is Text Party, a simple text editor where you can invite your friends or colleagues to collaborate in one single file.\n\nCreated by: Osaidii (Muhammad Osaid Hassan)\nVersion: 1.0\n\nFor more information, visit: https://github.com/Osaidii/text-party")
+    showinfo(title="About", message="This is Text Party, a simple text editor where you can join your friends or colleagues to collaborate in one single file.\n\nCreated by: Osaidii (Muhammad Osaid Hassan)\nVersion: 1.0\n\nFor more information, visit: https://github.com/Osaidii/text-party")
 
 def shortcuts():
     window = tk.Toplevel(root)
@@ -239,7 +241,6 @@ def shortcuts():
         ("Zoom In", "Ctrl + 8"),
         ("Zoom Out", "Ctrl + 9"),
         ("Reset Zoom", "Ctrl + 0"),
-        ("Invite", "Ctrl + I"),
         ("Remove", "Ctrl + R"),
         ("Join", "Ctrl + J"),
         ("Leave", "Ctrl + L"),
@@ -262,7 +263,7 @@ def on_close():
 # # # # #     Party Functions
 
 def about_party():
-    showinfo(title="About Party", message="A Party can be described as a group or a room which when used, can allow other invited members to edit and update the same text file.")
+    showinfo(title="About Party", message="A Party can be described as a group or a room which when used, can allow other joined members to edit and update the same text file.")
 
 def get_public_ip():
     try:
@@ -271,15 +272,22 @@ def get_public_ip():
         return "unknown"
 
 def start_party():
-    global party_mode, party_name, party_password, conn
-    party_name = simpledialog.askstring(title="Party Name",prompt="Enter a unique name for Party?:", parent=root)
+    global party_mode, party_name, party_password, conn, user_name
     if party_mode == True:
+        showerror("Party Failed", "Party mode is already active.")
         return
+    party_name = simpledialog.askstring(title="Party Name",prompt="Enter a unique name for Party?:", parent=root)
+    if party_name == "" or party_name is None:
+        showerror("Setup Failed", "Name already taken or not entered.")
+        return  
     party_password = simpledialog.askstring(title="Party Password",prompt="Enter password for Party?:", parent=root)
-    if party_password == "":
-        return
-    if party_password is None:
+    if party_password == "" or party_password is None:
         showerror("Setup Failed", "Password was not entered.")
+        party_mode = False
+        return False
+    user_name = simpledialog.askstring(title="User Name",prompt="Enter your name for this Party?:", parent=root)
+    if user_name == "" or user_name is None:
+        showerror("Setup Failed", "Name was not entered.")
         party_mode = False
         return False
     party_mode = True
@@ -291,64 +299,113 @@ def start_party():
             root.after(0, lambda: showerror("Connection Failed", "Couldn't get your public ip."))
             party_mode = False
             return
-        request = {"action": "create", "partyname": party_name, "partypassword": party_password, "members": [ip], "text": current_text}
+        request = {"action": "create", "filename": party_name, "partypassword": party_password, "members": {ip: user_name}, "text": current_text}
         try:
             asyncio.run(_send(request))
             conn = True
         except OSError as e:
             root.after(0, lambda: showerror("Connection Failed", f"Couldn't reach the party server:\n{e}"))
-            conn = None
+            conn = ""
             party_mode = False
     threading.Thread(target=worker, daemon=True).start()
 
 def stop_party():
     global party_mode, conn, pending_update
-    if pending_update is not None:
+    if pending_update != "":
         root.after_cancel(pending_update)
-        pending_update = None
-    if conn is None or not party_mode:
+        pending_update = ""
+    if conn == "" or not party_mode:
         party_mode = False
         return
     try:
-        request = {"action": "destroy", "partyname": party_name, "partypassword": party_password}
+        request = {"action": "destroy", "filename": party_name, "partypassword": party_password}
         threading.Thread(target=lambda: asyncio.run(_send(request)), daemon=True).start()
     except OSError:
         pass
-    conn = None
+    conn = ""
     party_mode = False
 
-def invite():
-    showinfo("Not Implemented", "Inviting members is coming soon!")
+def join():
+    global party_mode, party_name, party_password, conn, user_name
+    if party_mode:
+        showerror("Party Failed", "Party mode is already active or already in a party.")
+        return
+    party_name = simpledialog.askstring(title="Party Name",prompt="Enter Party Name?:", parent=root)
+    if party_name == "" or party_name is None:
+        showerror("Setup Failed", "Name was not entered.")
+        return  
+    party_password = simpledialog.askstring(title="Party Password",prompt="Enter Party Password?:", parent=root)
+    if party_password == "" or party_password is None:
+        showerror("Setup Failed", "Password was not entered.")
+        party_mode = False
+        return False
+    user_name = simpledialog.askstring(title="User Name",prompt="Enter your name for this Party?:", parent=root)
+    if user_name == "" or user_name is None:
+        showerror("Setup Failed", "Name was not entered.")
+        party_mode = False
+        return False
+    new_file()
+    party_mode = True
+    def worker():
+        global conn, party_mode
+        ip = get_public_ip()
+        if ip == "unknown":
+            root.after(0, lambda: showerror("Connection Failed", "Couldn't get your public ip."))
+            party_mode = False
+            return
+        request = {"action": "join", "filename": party_name, "partypassword": party_password, "ip": ip, "member_name": user_name}
+        try:
+            asyncio.run(_send(request))
+            conn = True
+        except OSError as e:
+            root.after(0, lambda: showerror("Connection Failed", f"Couldn't reach the party server:\n{e}"))
+            conn = ""
+            party_mode = False
+    threading.Thread(target=worker, daemon=True).start()
 
 def remove():
-    showinfo("Not Implemented", "Removing members is coming soon!")
-
-def join():
-    showinfo("Not Implemented", "Joining parties is coming soon!")
+    pass
 
 def leave():
-    showinfo("Not Implemented", "Leaving parties is coming soon!")
+    global party_mode, conn, pending_update
+    if not party_mode:
+        party_mode = False
+        return
+    if pending_update != "":
+        root.after_cancel(pending_update)
+        pending_update = ""
+    ip = get_public_ip()
+    def worker():
+        global conn, party_mode
+        try:
+            request = {"action": "leave", "filename": party_name, "partypassword": party_password, "ip": ip, "member_name": user_name}
+            asyncio.run(_send(request))
+        except OSError:
+            pass
+        finally:
+            conn = ""
+            party_mode = False
+    threading.Thread(target=worker, daemon=True).start()
 
 def update_text(event=None):
     global conn, pending_update
     text.edit_modified(False)
-    if conn is None or not party_mode:
+    if conn == "" or not party_mode:
         return
-    if pending_update is not None:
+    if pending_update != "":
         root.after_cancel(pending_update)
     def send():
         global conn
         try:
-            request = {"action": "update", "partyname": party_name, "partypassword": party_password, "text": text.get("1.0", "end-1c")}
+            request = {"action": "update", "filename": party_name, "partypassword": party_password, "text": text.get("1.0", "end-1c")}
             threading.Thread(target=lambda: asyncio.run(_send(request)), daemon=True).start()
         except OSError:
             showerror("Connection Lost", "Disconnected from the party server.")
-            conn = None
+            conn = ""
     pending_update = root.after(500, send)
 
 async def _send(request):
     async with websockets.connect("wss://text-party.osaidii.hackclub.app") as ws:
-        request["filename"] = request.pop("partyname")
         await ws.send(json.dumps(request))  
 
 
@@ -363,7 +420,6 @@ root.bind("<Control-n>", lambda event: new_file())
 root.bind("<Control-o>", lambda event: open_file())
 root.bind("<Control-z>", lambda event: undo())
 root.bind("<Control-y>", lambda event: redo())
-root.bind("<Control-i>", lambda event: invite())
 root.bind("<Control-r>", lambda event: remove())
 root.bind("<Control-j>", lambda event: join())
 root.bind("<Control-l>", lambda event: leave())
@@ -398,7 +454,6 @@ partymenu.add_command(label="About", command=about_party)
 partymenu.add_separator()
 partymenu.add_command(label="Start Party", command=start_party)
 partymenu.add_command(label="Stop Party", command=stop_party)
-partymenu.add_command(label="Invite", command=invite)
 partymenu.add_command(label="Remove", command=remove)
 partymenu.add_command(label="Join", command=join)
 partymenu.add_command(label="Leave", command=leave)
@@ -428,8 +483,11 @@ root.config(menu=menubar)
 
 root.mainloop()
 
-# Encoding, Searching and Replacing, Word Count can be added in the future updates.
+# Change from making a connection every time to making a connection once and keeping it open for the entire time.
+# Also look trough how to fix older return packet overwriting the newer one.
+# Add Inviting, Removing, Joining and Leaving parties. 
+# Make sure party name and user name are unique.
+# Add Text Recieving
+# Add member menu
 
-# Change from making a connection every time to making a connection once and keeping it open for the entire session. This will improve performance and reduce latency.
-# Also look trough how to fix older return packet overwriting the newer one. This can be done by adding a timestamp or counter to the packet and checking if the timestamp is older than the last received packet. If it is, then ignore the packet.
-# Add Inviting, REmoving, Joining and Leaving parties. 
+# Encoding, Searching and Replacing, Word Count can be added in the future updates.
