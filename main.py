@@ -5,6 +5,7 @@ from tkinter.filedialog import askopenfile, asksaveasfile
 from tkinter.messagebox import showinfo, showerror, askyesnocancel
 from tkinter import simpledialog
 from datetime import datetime
+from urllib import response
 import urllib.request
 import json
 import asyncio
@@ -23,7 +24,6 @@ dark_color = "#303030"
 party_name = ""
 party_password = ""
 conn = ""
-ip = "" 
 user_name = ""
 
 save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Text Party Saves")
@@ -301,8 +301,14 @@ def start_party():
             return
         request = {"action": "create", "filename": party_name, "partypassword": party_password, "members": {ip: user_name}, "text": current_text}
         try:
-            asyncio.run(_send(request))
-            conn = True
+            response = asyncio.run(_send(request))
+            if response and response.get("status") == "ok":
+                conn = True
+                root.after(0, lambda: showinfo("Success", f"Party '{party_name}' created!"))
+            else:
+                error_msg = response.get("message", "Unknown error") if response else "No response"
+                root.after(0, lambda: showerror("Creation Failed", f"Failed: {error_msg}"))
+                party_mode = False
         except OSError as e:
             root.after(0, lambda: showerror("Connection Failed", f"Couldn't reach the party server:\n{e}"))
             conn = ""
@@ -317,13 +323,18 @@ def stop_party():
     if conn == "" or not party_mode:
         party_mode = False
         return
-    try:
-        request = {"action": "destroy", "filename": party_name, "partypassword": party_password}
-        threading.Thread(target=lambda: asyncio.run(_send(request)), daemon=True).start()
-    except OSError:
-        pass
-    conn = ""
-    party_mode = False
+    def worker():
+        global conn, party_mode
+        try:
+            request = {"action": "destroy", "filename": party_name, "partypassword": party_password}
+            asyncio.run(_send(request))
+        except:
+            pass
+        finally:
+            conn = ""
+            party_mode = False
+    threading.Thread(target=worker, daemon=True).start()
+    showinfo("Success", "Party stopped.")
 
 def join():
     global party_mode, party_name, party_password, conn, user_name
@@ -344,7 +355,6 @@ def join():
         showerror("Setup Failed", "Name was not entered.")
         party_mode = False
         return False
-    new_file()
     party_mode = True
     def worker():
         global conn, party_mode
@@ -355,8 +365,15 @@ def join():
             return
         request = {"action": "join", "filename": party_name, "partypassword": party_password, "ip": ip, "member_name": user_name}
         try:
-            asyncio.run(_send(request))
-            conn = True
+            response = asyncio.run(_send(request))
+            if response and response.get("status") == "ok":
+                conn = True
+                root.after(0, lambda: new_file())
+                root.after(0, lambda: showinfo("Success", f"Joined party '{party_name}'!"))
+            else:
+                error_msg = response.get("message", "Unknown error") if response else "No response"
+                root.after(0, lambda: showerror("Join Failed", f"Failed: {error_msg}"))
+                party_mode = False
         except OSError as e:
             root.after(0, lambda: showerror("Connection Failed", f"Couldn't reach the party server:\n{e}"))
             conn = ""
@@ -364,7 +381,30 @@ def join():
     threading.Thread(target=worker, daemon=True).start()
 
 def remove():
-    pass
+    if not party_mode:
+        party_mode = False
+        return
+    ip = get_public_ip()
+    remove_name = simpledialog.askstring(title="Remove Member", prompt="Enter the name of the member to remove:", parent=root)
+    if remove_name == "" or remove_name is None:
+        showerror("Remove Failed", "Name was not entered.")
+        return
+    if remove_name == user_name:
+        showerror("Remove Failed", "You cannot remove yourself. Use Leave instead.")
+        return
+    def worker():
+        global conn
+        try:
+            request = {"action": "remove", "filename": party_name, "partypassword": party_password, "ip": ip, "member_name": user_name, "remove_name": remove_name}
+            response = asyncio.run(_send(request))
+            if response and response.get("status") == "ok":
+                root.after(0, lambda: showinfo("Success", f"'{remove_name}' removed from party."))
+            else:
+                error_msg = response.get("message", "Unknown error") if response else "No response"
+                root.after(0, lambda: showerror("Remove Failed", f"Failed: {error_msg}"))
+        except Exception as e:
+            root.after(0, lambda: showerror("Remove Failed", f"Error: {e}"))
+
 
 def leave():
     global party_mode, conn, pending_update
@@ -379,8 +419,10 @@ def leave():
         global conn, party_mode
         try:
             request = {"action": "leave", "filename": party_name, "partypassword": party_password, "ip": ip, "member_name": user_name}
-            asyncio.run(_send(request))
-        except OSError:
+            response = asyncio.run(_send(request))
+            if response and response.get("status") == "ok":
+                root.after(0, lambda: showinfo("Success", f"Left party '{party_name}'"))
+        except:
             pass
         finally:
             conn = ""
@@ -398,15 +440,23 @@ def update_text(event=None):
         global conn
         try:
             request = {"action": "update", "filename": party_name, "partypassword": party_password, "text": text.get("1.0", "end-1c")}
-            threading.Thread(target=lambda: asyncio.run(_send(request)), daemon=True).start()
-        except OSError:
-            showerror("Connection Lost", "Disconnected from the party server.")
+            response = asyncio.run(_send(request))
+            if not response or response.get("status") != "ok":
+                root.after(0, lambda: showerror("Update Failed", "Could not save changes."))
+                conn = ""
+        except Exception as e:
+            root.after(0, lambda: showerror("Connection Lost", f"Error: {e}"))
             conn = ""
     pending_update = root.after(500, send)
 
 async def _send(request):
-    async with websockets.connect("wss://text-party.osaidii.hackclub.app") as ws:
-        await ws.send(json.dumps(request))  
+    try:
+        async with websockets.connect("wss://text-party.osaidii.hackclub.app", timeout=10) as ws:
+            await ws.send(json.dumps(request))
+            response = await asyncio.wait_for(ws.recv(), timeout=10)
+            return json.loads(response)
+    except:
+        return {"status": "error", "message": "Request failed"}
 
 
 
@@ -485,7 +535,6 @@ root.mainloop()
 
 # Change from making a connection every time to making a connection once and keeping it open for the entire time.
 # Also look trough how to fix older return packet overwriting the newer one.
-# Add Inviting, Removing, Joining and Leaving parties. 
 # Make sure party name and user name are unique.
 # Add Text Recieving
 # Add member menu
