@@ -25,6 +25,7 @@ party_name = ""
 party_password = ""
 conn = ""
 user_name = ""
+ws_connection = ""  
 
 save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Text Party Saves")
 os.makedirs(save_folder, exist_ok=True)
@@ -265,11 +266,60 @@ def on_close():
 def about_party():
     showinfo(title="About Party", message="A Party can be described as a group or a room which when used, can allow other joined members to edit and update the same text file.")
 
+async def listen():
+    global ws_connection, party_mode
+    while party_mode and ws_connection != "":
+        try:
+            msg = await ws_connection.recv()
+            try:
+                data = json.loads(msg)
+            except json.JSONDecodeError:
+                continue
+            if data.get("action") == "update_text":
+                root.after(0, lambda: text.delete("1.0", "end-1c"))
+                root.after(0, lambda: text.insert("1.0", data.get("text", "")))
+        except:
+            ws_connection = ""
+            break
+
+def listener():
+    threading.Thread(target=lambda: asyncio.run(listen()), daemon=True).start()
+
 def get_public_ip():
     try:
         return urllib.request.urlopen("https://api.ipify.org", timeout=3).read().decode()
     except Exception:
         return "unknown"
+
+def see_members():
+    if not party_mode or conn == "":
+        showerror("Party Mode Inactive", "You are not currently in a party.")
+        return
+    def fetch():
+        response = asyncio.run(_send({"action": "members", "filename": party_name, "partypassword": party_password}))
+        root.after(0, lambda: show(response))
+    def show(response):
+        if response and response.get("status") == "ok":
+            members = response.get("members", {})
+            height = max(200, len(members) * 30 + 80)
+            
+            window = tk.Toplevel(root)
+            window.title("Members")
+            window.geometry(f"200x{height}")
+            window.resizable(False, True)
+            tk.Label(window, text=f"Members ({len(members)})", font=("Arial", 12, "bold")).pack(pady=10)
+            
+            for ip, name in sorted(members.items(), key=lambda x: x[1].lower()):
+                txt = f"• {name} (You)" if ip == get_public_ip() else f"• {name}"
+                tk.Label(window, text=txt, font=("Arial", 10)).pack(pady=1)
+            
+            tk.Button(window, text="Close", command=window.destroy).pack(pady=10)
+        else:
+            showerror("Error", "Could not fetch members")
+    threading.Thread(target=fetch, daemon=True).start()
+
+def check_unique_user_name(name, name_type):
+    pass
 
 def start_party():
     global party_mode, party_name, party_password, conn, user_name
@@ -305,15 +355,17 @@ def start_party():
             if response and response.get("status") == "ok":
                 conn = True
                 root.after(0, lambda: showinfo("Success", f"Party '{party_name}' created!"))
+                root.after(0, lambda: listener())
             else:
                 error_msg = response.get("message", "Unknown error") if response else "No response"
                 root.after(0, lambda: showerror("Creation Failed", f"Failed: {error_msg}"))
-                party_mode = False
+                party_mode = False  
         except OSError as e:
             root.after(0, lambda: showerror("Connection Failed", f"Couldn't reach the party server:\n{e}"))
             conn = ""
             party_mode = False
     threading.Thread(target=worker, daemon=True).start()
+    
 
 def stop_party():
     global party_mode, conn, pending_update
@@ -324,7 +376,7 @@ def stop_party():
         party_mode = False
         return
     def worker():
-        global conn, party_mode
+        global conn, party_mode, ws_connection
         try:
             request = {"action": "destroy", "filename": party_name, "partypassword": party_password}
             asyncio.run(_send(request))
@@ -333,8 +385,9 @@ def stop_party():
         finally:
             conn = ""
             party_mode = False
+            ws_connection = ""
+            root.after(0, lambda: showinfo("Success", "Party stopped."))
     threading.Thread(target=worker, daemon=True).start()
-    showinfo("Success", "Party stopped.")
 
 def join():
     global party_mode, party_name, party_password, conn, user_name
@@ -370,6 +423,7 @@ def join():
                 conn = True
                 root.after(0, lambda: new_file())
                 root.after(0, lambda: showinfo("Success", f"Joined party '{party_name}'!"))
+                root.after(0, lambda: listener())
             else:
                 error_msg = response.get("message", "Unknown error") if response else "No response"
                 root.after(0, lambda: showerror("Join Failed", f"Failed: {error_msg}"))
@@ -379,7 +433,7 @@ def join():
             conn = ""
             party_mode = False
     threading.Thread(target=worker, daemon=True).start()
-
+    
 def remove():
     if not party_mode:
         party_mode = False
@@ -405,7 +459,6 @@ def remove():
         except Exception as e:
             root.after(0, lambda: showerror("Remove Failed", f"Error: {e}"))
 
-
 def leave():
     global party_mode, conn, pending_update
     if not party_mode:
@@ -416,7 +469,7 @@ def leave():
         pending_update = ""
     ip = get_public_ip()
     def worker():
-        global conn, party_mode
+        global conn, party_mode, ws_connection
         try:
             request = {"action": "leave", "filename": party_name, "partypassword": party_password, "ip": ip, "member_name": user_name}
             response = asyncio.run(_send(request))
@@ -426,6 +479,7 @@ def leave():
             pass
         finally:
             conn = ""
+            ws_connection = ""
             party_mode = False
     threading.Thread(target=worker, daemon=True).start()
 
@@ -450,13 +504,17 @@ def update_text(event=None):
     pending_update = root.after(500, send)
 
 async def _send(request):
+    global ws_connection
     try:
-        async with websockets.connect("wss://text-party.osaidii.hackclub.app", timeout=10) as ws:
-            await ws.send(json.dumps(request))
-            response = await asyncio.wait_for(ws.recv(), timeout=10)
-            return json.loads(response)
-    except:
-        return {"status": "error", "message": "Request failed"}
+        if ws_connection == "":
+            ws_connection = await websockets.connect("wss://text-party.osaidii.hackclub.app")
+        await ws_connection.send(json.dumps(request))
+        response = await asyncio.wait_for(ws_connection.recv(), timeout=10)
+        return json.loads(response)
+    except Exception as e:
+        print(f"ERROR: {e}")
+        ws_connection = ""
+        return {"status": "error", "message": str(e)}
 
 
 
@@ -507,6 +565,7 @@ partymenu.add_command(label="Stop Party", command=stop_party)
 partymenu.add_command(label="Remove", command=remove)
 partymenu.add_command(label="Join", command=join)
 partymenu.add_command(label="Leave", command=leave)
+partymenu.add_command(label="See Members", command=see_members)
 menubar.add_cascade(label="Party", menu=partymenu)
 fontmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 for font_name in ("Arial", "Times New Roman", "Courier New", "Verdana", "Tahoma", "Georgia", "Trebuchet MS", "Comic Sans MS", "Impact", "Calibri", "Consolas", "Segoe UI"):
@@ -535,8 +594,10 @@ root.mainloop()
 
 # Change from making a connection every time to making a connection once and keeping it open for the entire time.
 # Also look trough how to fix older return packet overwriting the newer one.
-# Make sure party name and user name are unique.
-# Add Text Recieving
+
+
+#### in work right now:
+# Make user name is unique.
 # Add member menu
 
 # Encoding, Searching and Replacing, Word Count can be added in the future updates.
