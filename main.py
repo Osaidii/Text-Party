@@ -5,7 +5,6 @@ from tkinter.filedialog import askopenfile, asksaveasfile
 from tkinter.messagebox import showinfo, showerror, askyesnocancel
 from tkinter import simpledialog
 from datetime import datetime
-from urllib import response
 import urllib.request
 import json
 import asyncio
@@ -27,6 +26,9 @@ conn = ""
 user_name = ""
 ws_connection = ""  
 
+event_loop = asyncio.new_event_loop()
+asyncio.set_event_loop(event_loop)
+
 save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Text Party Saves")
 os.makedirs(save_folder, exist_ok=True)
 
@@ -40,7 +42,6 @@ default_font_size = font_size
 text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=True, maxundo=-1)
 text.pack()
 text.edit_separator()
-
 
 
 # # # # #     Editor Functions
@@ -74,7 +75,7 @@ def set_window_name(name: str):
     root.title(title)
 
 def new_file():
-    if party_mode:
+    if party_mode == True:
         showerror("Party Mode Active", "Cannot create a new file while in Party mode. Please leave the party first.")
         return
     global backup_filepath, user_filepath, filename
@@ -268,22 +269,26 @@ def about_party():
 
 async def listen():
     global ws_connection, party_mode
+    print("Listener started! Waiting for updates...")
     while party_mode and ws_connection != "":
         try:
             msg = await ws_connection.recv()
+            print(f"Listener received: {msg}")
             try:
                 data = json.loads(msg)
             except json.JSONDecodeError:
                 continue
             if data.get("action") == "update_text":
+                print("Updating text!")
                 root.after(0, lambda: text.delete("1.0", "end-1c"))
                 root.after(0, lambda: text.insert("1.0", data.get("text", "")))
-        except:
+        except Exception as e:
+            print(f"Listener error: {e}")
             ws_connection = ""
             break
 
-def listener():
-    threading.Thread(target=lambda: asyncio.run(listen()), daemon=True).start()
+def listener(): 
+    threading.Thread(target=lambda: event_loop.run_until_complete(listen()), daemon=True).start()
 
 def get_public_ip():
     try:
@@ -296,26 +301,26 @@ def see_members():
         showerror("Party Mode Inactive", "You are not currently in a party.")
         return
     def fetch():
-        response = asyncio.run(_send({"action": "members", "filename": party_name, "partypassword": party_password}))
+        request = {"action": "members", "filename": party_name, "partypassword": party_password}
+        response = send_request(request)
         root.after(0, lambda: show(response))
     def show(response):
         if response and response.get("status") == "ok":
             members = response.get("members", {})
             height = max(200, len(members) * 30 + 80)
-            
             window = tk.Toplevel(root)
             window.title("Members")
-            window.geometry(f"200x{height}")
+            window.geometry(f"250x{height}")
             window.resizable(False, True)
             tk.Label(window, text=f"Members ({len(members)})", font=("Arial", 12, "bold")).pack(pady=10)
-            
-            for ip, name in sorted(members.items(), key=lambda x: x[1].lower()):
-                txt = f"• {name} (You)" if ip == get_public_ip() else f"• {name}"
+            for username, ip in sorted(members.items(), key=lambda x: x[0].lower()):
+                txt = f"• {username} (You)" if username == user_name else f"• {username}"
                 tk.Label(window, text=txt, font=("Arial", 10)).pack(pady=1)
-            
             tk.Button(window, text="Close", command=window.destroy).pack(pady=10)
         else:
-            showerror("Error", "Could not fetch members")
+            error_msg = response.get("message", "Unknown error") if response else "No response"
+            showerror("Error", f"Could not fetch members: {error_msg}")
+    
     threading.Thread(target=fetch, daemon=True).start()
 
 def check_unique_user_name(name, name_type):
@@ -349,9 +354,9 @@ def start_party():
             root.after(0, lambda: showerror("Connection Failed", "Couldn't get your public ip."))
             party_mode = False
             return
-        request = {"action": "create", "filename": party_name, "partypassword": party_password, "members": {ip: user_name}, "text": current_text}
+        request = {"action": "create", "filename": party_name, "partypassword": party_password, "members": {user_name: ip}, "text": current_text}
         try:
-            response = asyncio.run(_send(request))
+            response = send_request(request)
             if response and response.get("status") == "ok":
                 conn = True
                 root.after(0, lambda: showinfo("Success", f"Party '{party_name}' created!"))
@@ -378,8 +383,8 @@ def stop_party():
     def worker():
         global conn, party_mode, ws_connection
         try:
-            request = {"action": "destroy", "filename": party_name, "partypassword": party_password}
-            asyncio.run(_send(request))
+            request = {"action": "destroy", "filename": party_name, "partypassword": party_password, "member_name": user_name}
+            send_request(request)
         except:
             pass
         finally:
@@ -390,7 +395,7 @@ def stop_party():
     threading.Thread(target=worker, daemon=True).start()
 
 def join():
-    global party_mode, party_name, party_password, conn, user_name
+    global party_mode, party_name, party_password, conn, user_name, filename, backup_filepath, user_filepath
     if party_mode:
         showerror("Party Failed", "Party mode is already active or already in a party.")
         return
@@ -408,6 +413,12 @@ def join():
         showerror("Setup Failed", "Name was not entered.")
         party_mode = False
         return False
+    set_window_name("Untitled")
+    filename = "Untitled"
+    backup_filepath = ""
+    text.edit_reset()
+    user_filepath = ""
+    text.delete("1.0", tk.END)
     party_mode = True
     def worker():
         global conn, party_mode
@@ -418,10 +429,9 @@ def join():
             return
         request = {"action": "join", "filename": party_name, "partypassword": party_password, "ip": ip, "member_name": user_name}
         try:
-            response = asyncio.run(_send(request))
+            response = send_request(request)
             if response and response.get("status") == "ok":
                 conn = True
-                root.after(0, lambda: new_file())
                 root.after(0, lambda: showinfo("Success", f"Joined party '{party_name}'!"))
                 root.after(0, lambda: listener())
             else:
@@ -438,7 +448,6 @@ def remove():
     if not party_mode:
         party_mode = False
         return
-    ip = get_public_ip()
     remove_name = simpledialog.askstring(title="Remove Member", prompt="Enter the name of the member to remove:", parent=root)
     if remove_name == "" or remove_name is None:
         showerror("Remove Failed", "Name was not entered.")
@@ -449,8 +458,8 @@ def remove():
     def worker():
         global conn
         try:
-            request = {"action": "remove", "filename": party_name, "partypassword": party_password, "ip": ip, "member_name": user_name, "remove_name": remove_name}
-            response = asyncio.run(_send(request))
+            request = {"action": "remove", "filename": party_name, "partypassword": party_password, "member_name": user_name, "remove_name": remove_name}
+            response = send_request(request)
             if response and response.get("status") == "ok":
                 root.after(0, lambda: showinfo("Success", f"'{remove_name}' removed from party."))
             else:
@@ -467,12 +476,11 @@ def leave():
     if pending_update != "":
         root.after_cancel(pending_update)
         pending_update = ""
-    ip = get_public_ip()
     def worker():
         global conn, party_mode, ws_connection
         try:
-            request = {"action": "leave", "filename": party_name, "partypassword": party_password, "ip": ip, "member_name": user_name}
-            response = asyncio.run(_send(request))
+            request = {"action": "leave", "filename": party_name, "partypassword": party_password, "member_name": user_name}
+            response = send_request(request)
             if response and response.get("status") == "ok":
                 root.after(0, lambda: showinfo("Success", f"Left party '{party_name}'"))
         except:
@@ -494,7 +502,7 @@ def update_text(event=None):
         global conn
         try:
             request = {"action": "update", "filename": party_name, "partypassword": party_password, "text": text.get("1.0", "end-1c")}
-            response = asyncio.run(_send(request))
+            response = send_request(request)
             if not response or response.get("status") != "ok":
                 root.after(0, lambda: showerror("Update Failed", "Could not save changes."))
                 conn = ""
@@ -502,6 +510,18 @@ def update_text(event=None):
             root.after(0, lambda: showerror("Connection Lost", f"Error: {e}"))
             conn = ""
     pending_update = root.after(500, send)
+
+def send_request(request):
+    global event_loop
+    try:
+        if event_loop.is_closed():
+            event_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(event_loop)
+        future = asyncio.run_coroutine_threadsafe(_send(request), event_loop)  # ✅ THIS LINE
+        return future.result(timeout=10)  # ✅ AND THIS LINE
+    except Exception as e:
+        print(f"send_request error: {e}")
+        return {"status": "error", "message": str(e)}
 
 async def _send(request):
     global ws_connection
@@ -591,13 +611,5 @@ menubar.add_cascade(label="Help", menu=aboutmenu)
 root.config(menu=menubar)
 
 root.mainloop()
-
-# Change from making a connection every time to making a connection once and keeping it open for the entire time.
-# Also look trough how to fix older return packet overwriting the newer one.
-
-
-#### in work right now:
-# Make user name is unique.
-# Add member menu
 
 # Encoding, Searching and Replacing, Word Count can be added in the future updates.
