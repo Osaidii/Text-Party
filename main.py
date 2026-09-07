@@ -27,7 +27,12 @@ user_name = ""
 ws_connection = ""  
 
 event_loop = asyncio.new_event_loop()
-asyncio.set_event_loop(event_loop)
+
+def _run_event_loop():
+    asyncio.set_event_loop(event_loop)
+    event_loop.run_forever()
+
+threading.Thread(target=_run_event_loop, daemon=True).start()
 
 save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Text Party Saves")
 os.makedirs(save_folder, exist_ok=True)
@@ -104,22 +109,30 @@ def open_file():
         continue_forward = save_file_popup()
         if not continue_forward:
             return
-    f = askopenfile(mode='r')
-    if f:
+    f = askopenfile(mode='r', encoding='utf-8', filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+    if f is None:
+        return
+    try:
         with f:
             t = f.read()
-            text.delete("1.0", tk.END)
-            text.insert("1.0", t)     
-            user_filepath = f.name
-            text.edit_reset()
-            filename = os.path.basename(f.name)
-            set_window_name(os.path.basename(f.name))
-            backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
-            try:
-                with open(backup_filepath, 'w') as backup_file:
-                    backup_file.write(t)
-            except OSError:
-                showerror("Backup Failed", "Could not create backup file!")
+    except UnicodeDecodeError:
+        showerror("Open Failed", "Could not open file. Please ensure it is a valid text file.")
+        return
+    except OSError as e:
+        showerror("Open Failed", str(e))
+        return
+    text.delete("1.0", tk.END)
+    text.insert("1.0", t)     
+    user_filepath = f.name
+    text.edit_reset()
+    filename = os.path.basename(f.name)
+    set_window_name(os.path.basename(f.name))
+    backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
+    try:
+        with open(backup_filepath, 'w') as backup_file:
+            backup_file.write(t)
+    except OSError:
+        showerror("Backup Failed", "Could not create backup file!")
 
 def save_file():
     global filename, backup_filepath, backup_filename, user_filepath
@@ -152,7 +165,7 @@ def autosave():
 def save_as(): 
     global filename, backup_filepath, user_filepath, backup_filename
     f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder)
-    if f == "":
+    if f == None:
         return False
     t = text.get("1.0", "end-1c")
     try:
@@ -269,26 +282,22 @@ def about_party():
 
 async def listen():
     global ws_connection, party_mode
-    print("Listener started! Waiting for updates...")
     while party_mode and ws_connection != "":
         try:
             msg = await ws_connection.recv()
-            print(f"Listener received: {msg}")
             try:
                 data = json.loads(msg)
             except json.JSONDecodeError:
                 continue
             if data.get("action") == "update_text":
-                print("Updating text!")
                 root.after(0, lambda: text.delete("1.0", "end-1c"))
                 root.after(0, lambda: text.insert("1.0", data.get("text", "")))
         except Exception as e:
-            print(f"Listener error: {e}")
             ws_connection = ""
             break
 
 def listener(): 
-    threading.Thread(target=lambda: event_loop.run_until_complete(listen()), daemon=True).start()
+    asyncio.run_coroutine_threadsafe(listen(), event_loop)
 
 def get_public_ip():
     try:
@@ -322,9 +331,6 @@ def see_members():
             showerror("Error", f"Could not fetch members: {error_msg}")
     
     threading.Thread(target=fetch, daemon=True).start()
-
-def check_unique_user_name(name, name_type):
-    pass
 
 def start_party():
     global party_mode, party_name, party_password, conn, user_name
@@ -371,7 +377,6 @@ def start_party():
             party_mode = False
     threading.Thread(target=worker, daemon=True).start()
     
-
 def stop_party():
     global party_mode, conn, pending_update
     if pending_update != "":
@@ -396,6 +401,10 @@ def stop_party():
 
 def join():
     global party_mode, party_name, party_password, conn, user_name, filename, backup_filepath, user_filepath
+    if not is_file_saved() and text.get("1.0", "end-1c").strip() != "":
+        continue_forward = save_file_popup()
+        if not continue_forward:
+            return
     if party_mode:
         showerror("Party Failed", "Party mode is already active or already in a party.")
         return
@@ -432,6 +441,9 @@ def join():
             response = send_request(request)
             if response and response.get("status") == "ok":
                 conn = True
+                party_text = response.get("data", {}).get("text", "")
+                root.after(0, lambda: text.delete("1.0", tk.END))
+                root.after(0, lambda: text.insert("1.0", party_text))
                 root.after(0, lambda: showinfo("Success", f"Joined party '{party_name}'!"))
                 root.after(0, lambda: listener())
             else:
@@ -445,6 +457,7 @@ def join():
     threading.Thread(target=worker, daemon=True).start()
     
 def remove():
+    global party_mode, conn
     if not party_mode:
         party_mode = False
         return
@@ -514,13 +527,9 @@ def update_text(event=None):
 def send_request(request):
     global event_loop
     try:
-        if event_loop.is_closed():
-            event_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(event_loop)
-        future = asyncio.run_coroutine_threadsafe(_send(request), event_loop)  # ✅ THIS LINE
-        return future.result(timeout=10)  # ✅ AND THIS LINE
+        future = asyncio.run_coroutine_threadsafe(_send(request), event_loop)
+        return future.result(timeout=10)
     except Exception as e:
-        print(f"send_request error: {e}")
         return {"status": "error", "message": str(e)}
 
 async def _send(request):
@@ -532,7 +541,6 @@ async def _send(request):
         response = await asyncio.wait_for(ws_connection.recv(), timeout=10)
         return json.loads(response)
     except Exception as e:
-        print(f"ERROR: {e}")
         ws_connection = ""
         return {"status": "error", "message": str(e)}
 
@@ -611,5 +619,7 @@ menubar.add_cascade(label="Help", menu=aboutmenu)
 root.config(menu=menubar)
 
 root.mainloop()
+
+# Everything kinda broken
 
 # Encoding, Searching and Replacing, Word Count can be added in the future updates.
