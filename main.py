@@ -156,11 +156,13 @@ def save_file():
         showerror("Save Failed", str(e))
     
 def autosave():
+    root.after(120000, autosave)
+    if party_mode:
+        return
     if not root.winfo_exists():
         return
     if user_filepath != "":
         save_file()
-    root.after(120000, autosave)
 
 def save_as(): 
     global filename, backup_filepath, user_filepath, backup_filename
@@ -266,6 +268,10 @@ def shortcuts():
 
 def on_close():
     if party_mode:
+        if text.get("1.0", "end-1c").strip() != "":
+                if not is_file_saved():
+                    if not save_file_popup():
+                        return
         stop_party()
     if text.get("1.0", "end-1c").strip() != "":
         if not is_file_saved():
@@ -341,7 +347,7 @@ def start_party():
     if party_name == "" or party_name is None:
         showerror("Setup Failed", "Name already taken or not entered.")
         return  
-    party_password = simpledialog.askstring(title="Party Password",prompt="Enter password for Party?:", parent=root)
+    party_password = simpledialog.askstring(title="Party Password",prompt="Enter password for Party?:", parent=root, show="*")
     if party_password == "" or party_password is None:
         showerror("Setup Failed", "Password was not entered.")
         party_mode = False
@@ -551,7 +557,7 @@ async def _send(request):
 root.minsize(width=400, height=400)
 root.protocol("WM_DELETE_WINDOW", on_close)
 root.bind("<Control-s>", lambda event: save_file())
-root.bind("<Control-Shift-s>", lambda event: save_as())
+root.bind("<Control-Shift-S>", lambda event: save_as())
 root.bind("<Control-n>", lambda event: new_file())
 root.bind("<Control-o>", lambda event: open_file())
 root.bind("<Control-z>", lambda event: undo())
@@ -559,9 +565,6 @@ root.bind("<Control-y>", lambda event: redo())
 root.bind("<Control-r>", lambda event: remove())
 root.bind("<Control-j>", lambda event: join())
 root.bind("<Control-l>", lambda event: leave())
-text.bind("<Control-x>", lambda event: text.event_generate("<<Cut>>"))
-text.bind("<Control-c>", lambda event: text.event_generate("<<Copy>>"))
-text.bind("<Control-v>", lambda event: text.event_generate("<<Paste>>"))
 text.bind("<Control-0>", lambda event: change_font_size(default_font_size))
 text.bind("<Control-8>", zoom_in)
 text.bind("<Control-9>", zoom_out)
