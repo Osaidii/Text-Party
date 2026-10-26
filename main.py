@@ -3,12 +3,8 @@ import tkinter as tk
 import os
 from tkinter.filedialog import askopenfile, asksaveasfile
 from tkinter.messagebox import showinfo, showerror, askyesnocancel
-from tkinter import simpledialog
 from datetime import datetime
-import urllib.request
-import json
 import asyncio
-import websockets
 
 filename = ""
 user_filepath = ""
@@ -286,271 +282,6 @@ def on_close():
 def about_party():
     showinfo(title="About Party", message="A Party can be described as a group or a room which when used, can allow other joined members to edit and update the same text file.")
 
-async def listen():
-    global ws_connection, party_mode
-    while party_mode and ws_connection != "":
-        try:
-            msg = await ws_connection.recv()
-            try:
-                data = json.loads(msg)
-            except json.JSONDecodeError:
-                continue
-            if data.get("action") == "update_text":
-                root.after(0, lambda: text.delete("1.0", "end-1c"))
-                root.after(0, lambda: text.insert("1.0", data.get("text", "")))
-        except Exception as e:
-            ws_connection = ""
-            break
-
-def listener(): 
-    asyncio.run_coroutine_threadsafe(listen(), event_loop)
-
-def get_public_ip():
-    try:
-        return urllib.request.urlopen("https://api.ipify.org", timeout=3).read().decode()
-    except Exception:
-        return "unknown"
-
-def see_members():
-    if not party_mode or conn == "":
-        showerror("Party Mode Inactive", "You are not currently in a party.")
-        return
-    def fetch():
-        request = {"action": "members", "filename": party_name, "partypassword": party_password}
-        response = send_request(request)
-        root.after(0, lambda: show(response))
-    def show(response):
-        if response and response.get("status") == "ok":
-            members = response.get("members", {})
-            height = max(200, len(members) * 30 + 80)
-            window = tk.Toplevel(root)
-            window.title("Members")
-            window.geometry(f"250x{height}")
-            window.resizable(False, True)
-            tk.Label(window, text=f"Members ({len(members)})", font=("Arial", 12, "bold")).pack(pady=10)
-            for username, ip in sorted(members.items(), key=lambda x: x[0].lower()):
-                txt = f"• {username} (You)" if username == user_name else f"• {username}"
-                tk.Label(window, text=txt, font=("Arial", 10)).pack(pady=1)
-            tk.Button(window, text="Close", command=window.destroy).pack(pady=10)
-        else:
-            error_msg = response.get("message", "Unknown error") if response else "No response"
-            showerror("Error", f"Could not fetch members: {error_msg}")
-    
-    threading.Thread(target=fetch, daemon=True).start()
-
-def start_party():
-    global party_mode, party_name, party_password, conn, user_name
-    if party_mode == True:
-        showerror("Party Failed", "Party mode is already active.")
-        return
-    party_name = simpledialog.askstring(title="Party Name",prompt="Enter a unique name for Party?:", parent=root)
-    if party_name == "" or party_name is None:
-        showerror("Setup Failed", "Name already taken or not entered.")
-        return  
-    party_password = simpledialog.askstring(title="Party Password",prompt="Enter password for Party?:", parent=root, show="*")
-    if party_password == "" or party_password is None:
-        showerror("Setup Failed", "Password was not entered.")
-        party_mode = False
-        return False
-    user_name = simpledialog.askstring(title="User Name",prompt="Enter your name for this Party?:", parent=root)
-    if user_name == "" or user_name is None:
-        showerror("Setup Failed", "Name was not entered.")
-        party_mode = False
-        return False
-    party_mode = True
-    current_text = text.get("1.0", "end-1c")
-    def worker():
-        global conn, party_mode
-        ip = get_public_ip()
-        if ip == "unknown":
-            root.after(0, lambda: showerror("Connection Failed", "Couldn't get your public ip."))
-            party_mode = False
-            return
-        request = {"action": "create", "filename": party_name, "partypassword": party_password, "members": {user_name: ip}, "text": current_text}
-        try:
-            response = send_request(request)
-            if response and response.get("status") == "ok":
-                conn = True
-                root.after(0, lambda: showinfo("Success", f"Party '{party_name}' created!"))
-                root.after(0, lambda: listener())
-            else:
-                error_msg = response.get("message", "Unknown error") if response else "No response"
-                root.after(0, lambda: showerror("Creation Failed", f"Failed: {error_msg}"))
-                party_mode = False  
-        except OSError as e:
-            root.after(0, lambda: showerror("Connection Failed", f"Couldn't reach the party server:\n{e}"))
-            conn = ""
-            party_mode = False
-    threading.Thread(target=worker, daemon=True).start()
-    
-def stop_party():
-    global party_mode, conn, pending_update
-    if pending_update != "":
-        root.after_cancel(pending_update)
-        pending_update = ""
-    if conn == "" or not party_mode:
-        party_mode = False
-        return
-    def worker():
-        global conn, party_mode, ws_connection
-        try:
-            request = {"action": "destroy", "filename": party_name, "partypassword": party_password, "member_name": user_name}
-            send_request(request)
-        except:
-            pass
-        finally:
-            conn = ""
-            party_mode = False
-            ws_connection = ""
-            root.after(0, lambda: showinfo("Success", "Party stopped."))
-    threading.Thread(target=worker, daemon=True).start()
-
-def join():
-    global party_mode, party_name, party_password, conn, user_name, filename, backup_filepath, user_filepath
-    if not is_file_saved() and text.get("1.0", "end-1c").strip() != "":
-        continue_forward = save_file_popup()
-        if not continue_forward:
-            return
-    if party_mode:
-        showerror("Party Failed", "Party mode is already active or already in a party.")
-        return
-    party_name = simpledialog.askstring(title="Party Name",prompt="Enter Party Name?:", parent=root)
-    if party_name == "" or party_name is None:
-        showerror("Setup Failed", "Name was not entered.")
-        return  
-    party_password = simpledialog.askstring(title="Party Password",prompt="Enter Party Password?:", parent=root)
-    if party_password == "" or party_password is None:
-        showerror("Setup Failed", "Password was not entered.")
-        party_mode = False
-        return False
-    user_name = simpledialog.askstring(title="User Name",prompt="Enter your name for this Party?:", parent=root)
-    if user_name == "" or user_name is None:
-        showerror("Setup Failed", "Name was not entered.")
-        party_mode = False
-        return False
-    set_window_name("Untitled")
-    filename = "Untitled"
-    backup_filepath = ""
-    text.edit_reset()
-    user_filepath = ""
-    text.delete("1.0", tk.END)
-    party_mode = True
-    def worker():
-        global conn, party_mode
-        ip = get_public_ip()
-        if ip == "unknown":
-            root.after(0, lambda: showerror("Connection Failed", "Couldn't get your public ip."))
-            party_mode = False
-            return
-        request = {"action": "join", "filename": party_name, "partypassword": party_password, "ip": ip, "member_name": user_name}
-        try:
-            response = send_request(request)
-            if response and response.get("status") == "ok":
-                conn = True
-                party_text = response.get("data", {}).get("text", "")
-                root.after(0, lambda: text.delete("1.0", tk.END))
-                root.after(0, lambda: text.insert("1.0", party_text))
-                root.after(0, lambda: showinfo("Success", f"Joined party '{party_name}'!"))
-                root.after(0, lambda: listener())
-            else:
-                error_msg = response.get("message", "Unknown error") if response else "No response"
-                root.after(0, lambda: showerror("Join Failed", f"Failed: {error_msg}"))
-                party_mode = False
-        except OSError as e:
-            root.after(0, lambda: showerror("Connection Failed", f"Couldn't reach the party server:\n{e}"))
-            conn = ""
-            party_mode = False
-    threading.Thread(target=worker, daemon=True).start()
-    
-def remove():
-    global party_mode, conn
-    if not party_mode:
-        party_mode = False
-        return
-    remove_name = simpledialog.askstring(title="Remove Member", prompt="Enter the name of the member to remove:", parent=root)
-    if remove_name == "" or remove_name is None:
-        showerror("Remove Failed", "Name was not entered.")
-        return
-    if remove_name == user_name:
-        showerror("Remove Failed", "You cannot remove yourself. Use Leave instead.")
-        return
-    def worker():
-        global conn
-        try:
-            request = {"action": "remove", "filename": party_name, "partypassword": party_password, "member_name": user_name, "remove_name": remove_name}
-            response = send_request(request)
-            if response and response.get("status") == "ok":
-                root.after(0, lambda: showinfo("Success", f"'{remove_name}' removed from party."))
-            else:
-                error_msg = response.get("message", "Unknown error") if response else "No response"
-                root.after(0, lambda: showerror("Remove Failed", f"Failed: {error_msg}"))
-        except Exception as e:
-            root.after(0, lambda: showerror("Remove Failed", f"Error: {e}"))
-
-def leave():
-    global party_mode, conn, pending_update
-    if not party_mode:
-        party_mode = False
-        return
-    if pending_update != "":
-        root.after_cancel(pending_update)
-        pending_update = ""
-    def worker():
-        global conn, party_mode, ws_connection
-        try:
-            request = {"action": "leave", "filename": party_name, "partypassword": party_password, "member_name": user_name}
-            response = send_request(request)
-            if response and response.get("status") == "ok":
-                root.after(0, lambda: showinfo("Success", f"Left party '{party_name}'"))
-        except:
-            pass
-        finally:
-            conn = ""
-            ws_connection = ""
-            party_mode = False
-    threading.Thread(target=worker, daemon=True).start()
-
-def update_text(event=None):
-    global conn, pending_update
-    text.edit_modified(False)
-    if conn == "" or not party_mode:
-        return
-    if pending_update != "":
-        root.after_cancel(pending_update)
-    def send():
-        global conn
-        try:
-            request = {"action": "update", "filename": party_name, "partypassword": party_password, "text": text.get("1.0", "end-1c")}
-            response = send_request(request)
-            if not response or response.get("status") != "ok":
-                root.after(0, lambda: showerror("Update Failed", "Could not save changes."))
-                conn = ""
-        except Exception as e:
-            root.after(0, lambda: showerror("Connection Lost", f"Error: {e}"))
-            conn = ""
-    pending_update = root.after(500, send)
-
-def send_request(request):
-    global event_loop
-    try:
-        future = asyncio.run_coroutine_threadsafe(_send(request), event_loop)
-        return future.result(timeout=10)
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-async def _send(request):
-    global ws_connection
-    try:
-        if ws_connection == "":
-            ws_connection = await websockets.connect("wss://text-party.osaidii.hackclub.app")
-        await ws_connection.send(json.dumps(request))
-        response = await asyncio.wait_for(ws_connection.recv(), timeout=10)
-        return json.loads(response)
-    except Exception as e:
-        ws_connection = ""
-        return {"status": "error", "message": str(e)}
-
-
 
 # # # # #     Software Loop
 
@@ -562,13 +293,9 @@ root.bind("<Control-n>", lambda event: new_file())
 root.bind("<Control-o>", lambda event: open_file())
 root.bind("<Control-z>", lambda event: undo())
 root.bind("<Control-y>", lambda event: redo())
-root.bind("<Control-r>", lambda event: remove())
-root.bind("<Control-j>", lambda event: join())
-root.bind("<Control-l>", lambda event: leave())
 text.bind("<Control-0>", lambda event: change_font_size(default_font_size))
 text.bind("<Control-8>", zoom_in)
 text.bind("<Control-9>", zoom_out)
-text.bind("<<Modified>>", update_text)
 root.after(120000, autosave)
 
 menubar = tk.Menu(root, font=("Arial"))
@@ -591,12 +318,12 @@ menubar.add_cascade(label="Edit", menu=editmenu)
 partymenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 partymenu.add_command(label="About", command=about_party) 
 partymenu.add_separator()
-partymenu.add_command(label="Start Party", command=start_party)
-partymenu.add_command(label="Stop Party", command=stop_party)
-partymenu.add_command(label="Remove", command=remove)
-partymenu.add_command(label="Join", command=join)
-partymenu.add_command(label="Leave", command=leave)
-partymenu.add_command(label="See Members", command=see_members)
+partymenu.add_command(label="Start Party", command=None)
+partymenu.add_command(label="Stop Party", command=None)
+partymenu.add_command(label="Remove", command=None)
+partymenu.add_command(label="Join", command=None)
+partymenu.add_command(label="Leave", command=None)
+partymenu.add_command(label="See Members", command=None)
 menubar.add_cascade(label="Party", menu=partymenu)
 fontmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
 for font_name in ("Arial", "Times New Roman", "Courier New", "Verdana", "Tahoma", "Georgia", "Trebuchet MS", "Comic Sans MS", "Impact", "Calibri", "Consolas", "Segoe UI"):
