@@ -10,25 +10,11 @@ filename = ""
 user_filepath = ""
 backup_filename = ""
 backup_filepath = ""
-party_mode = False
-pending_update = ""
+last_backup = ""
 font = "Arial"
 current_mode = "Dark"
 light_color = "#E4E4E4"
 dark_color = "#303030"
-party_name = ""
-party_password = ""
-conn = ""
-user_name = ""
-ws_connection = ""  
-
-event_loop = asyncio.new_event_loop()
-
-def _run_event_loop():
-    asyncio.set_event_loop(event_loop)
-    event_loop.run_forever()
-
-threading.Thread(target=_run_event_loop, daemon=True).start()
 
 save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Text Party Saves")
 os.makedirs(save_folder, exist_ok=True)
@@ -53,7 +39,7 @@ def is_file_saved():
     try:
         if not os.path.exists(user_filepath):
             return False
-        with open(user_filepath, "r") as f:
+        with open(user_filepath, "r", encoding="utf-8") as f:
             saved_text = f.read()
         current_text = text.get("1.0", "end-1c")
         return current_text == saved_text
@@ -76,10 +62,7 @@ def set_window_name(name: str):
     root.title(title)
 
 def new_file():
-    if party_mode == True:
-        showerror("Party Mode Active", "Cannot create a new file while in Party mode. Please leave the party first.")
-        return
-    global backup_filepath, user_filepath, filename
+    global backup_filepath, user_filepath, filename, last_backup
     if text.get("1.0", "end-1c").strip() != "" and is_file_saved() == False:
         continue_forward = save_file_popup()
         if continue_forward:
@@ -92,15 +75,13 @@ def new_file():
     text.edit_reset()
     user_filepath = ""
     text.delete("1.0", tk.END)
+    last_backup = ""
 
 new_file()
 set_window_name("Untitled")
 
 def open_file():
-    if party_mode:
-        showerror("Party Mode Active", "Cannot open a file while in Party mode. Please leave the party first.")
-        return
-    global filename, user_filepath, backup_filepath
+    global filename, user_filepath, backup_filepath, last_backup
     if text.get("1.0", "end-1c").strip() != "" and not is_file_saved():
         continue_forward = save_file_popup()
         if not continue_forward:
@@ -120,49 +101,54 @@ def open_file():
     text.delete("1.0", tk.END)
     text.insert("1.0", t)     
     user_filepath = f.name
+    last_backup = ""
     text.edit_reset()
     filename = os.path.basename(f.name)
     set_window_name(os.path.basename(f.name))
     backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
     try:
-        with open(backup_filepath, 'w') as backup_file:
+        with open(backup_filepath, 'w', encoding="utf-8") as backup_file:
             backup_file.write(t)
     except OSError:
         showerror("Backup Failed", "Could not create backup file!")
 
 def save_file():
-    global filename, backup_filepath, backup_filename, user_filepath
+    global filename, backup_filepath, backup_filename, user_filepath, last_backup
     if user_filepath == "":
         return save_as()
     t = text.get("1.0", "end-1c")
     try:
-        with open(user_filepath, "w") as f:
+        with open(user_filepath, "w", encoding="utf-8") as f:
             f.write(t)
     except OSError as e:
         showerror("Save Failed", str(e))
     try:
-        with open(backup_filepath, 'w') as backup_file:
+        with open(backup_filepath, 'w', encoding="utf-8") as backup_file:
             backup_file.write(t)
         current_name = backup_filepath
         backup_filename = f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}"
         new_filepath = os.path.join(os.path.dirname(backup_filepath), backup_filename)
         os.rename(current_name, new_filepath)
+        last_backup = new_filepath
         backup_filepath = new_filepath
     except OSError as e:
         showerror("Save Failed", str(e))
     
 def autosave():
-    root.after(120000, autosave)
-    if party_mode:
-        return
+    text.after(120000, autosave)
     if not root.winfo_exists():
         return
+    if last_backup != "":
+        with open(last_backup, 'w', encoding="utf-8") as backup_file:
+            t = backup_file.read().strip()
+        if text.get("1.0", "end-1c").strip() == t:
+            return
     if user_filepath != "":
         save_file()
 
 def save_as(): 
-    global filename, backup_filepath, user_filepath, backup_filename
-    f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder)
+    global filename, backup_filepath, user_filepath, backup_filename, last_backup
+    f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder, encoding="utf-8")
     if f == None:
         return False
     t = text.get("1.0", "end-1c")
@@ -178,7 +164,8 @@ def save_as():
     try:
         backup_filepath = os.path.join(save_folder, f"{filename} {datetime.now().strftime('%H-%M-%S %m-%d-%y')}")
         backup_filename = os.path.basename(backup_filepath)
-        with open(backup_filepath, 'w') as backup_file:
+        last_backup = os.path.abspath(backup_filepath)
+        with open(backup_filepath, 'w', encoding="utf-8") as backup_file:
             backup_file.write(t)
     except OSError:
         showerror(title="Backup Failed", message="Unable to create backup!")
@@ -263,12 +250,6 @@ def shortcuts():
         tk.Label(window, text=shortcut, font=("Arial", 12)).grid(row=row, column=1, padx=20, pady=5)
 
 def on_close():
-    if party_mode:
-        if text.get("1.0", "end-1c").strip() != "":
-                if not is_file_saved():
-                    if not save_file_popup():
-                        return
-        stop_party()
     if text.get("1.0", "end-1c").strip() != "":
         if not is_file_saved():
             if not save_file_popup():
@@ -287,16 +268,14 @@ def about_party():
 
 root.minsize(width=400, height=400)
 root.protocol("WM_DELETE_WINDOW", on_close)
-root.bind("<Control-s>", lambda event: save_file())
-root.bind("<Control-Shift-S>", lambda event: save_as())
-root.bind("<Control-n>", lambda event: new_file())
-root.bind("<Control-o>", lambda event: open_file())
-root.bind("<Control-z>", lambda event: undo())
-root.bind("<Control-y>", lambda event: redo())
+text.bind("<Control-s>", lambda event: save_file())
+text.bind("<Control-Shift-S>", lambda event: save_as())
+text.bind("<Control-n>", lambda event: new_file())
+text.bind("<Control-o>", lambda event: open_file())
 text.bind("<Control-0>", lambda event: change_font_size(default_font_size))
 text.bind("<Control-8>", zoom_in)
 text.bind("<Control-9>", zoom_out)
-root.after(120000, autosave)
+text.after(120000, autosave)
 
 menubar = tk.Menu(root, font=("Arial"))
 filemenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
@@ -350,6 +329,4 @@ root.config(menu=menubar)
 
 root.mainloop()
 
-# Everything kinda broken
-
-# Encoding, Searching and Replacing, Word Count can be added in the future updates.
+# Searching and Replacing, Word Count can be added in the future updates.
