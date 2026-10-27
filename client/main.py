@@ -7,6 +7,7 @@ from datetime import datetime
 user_filepath = ""
 backup_filepath = ""
 autosave_fails = 0
+autosave_job = None
 font = "Arial"
 current_mode = "Dark"
 light_color = "#E4E4E4"
@@ -34,7 +35,7 @@ def setWindowName(name: str):
     root.title(title)
 
 def newFile():
-    global backup_filepath, user_filepath
+    global backup_filepath, user_filepath, autosave_fails
     if text.get("1.0", "end-1c").strip() != "" and not isFileSaved():
         continue_forward = askUserToSave()
         if not continue_forward:
@@ -44,11 +45,13 @@ def newFile():
     text.edit_reset()
     user_filepath = ""
     text.delete("1.0", tk.END)
+    autosave_fails = 0
+    cancelAutosave()
 
 newFile()
 
 def openFile():
-    global user_filepath, backup_filepath
+    global user_filepath, backup_filepath, autosave_fails
     if text.get("1.0", "end-1c").strip() != "" and not isFileSaved():
         continue_forward = askUserToSave()
         if not continue_forward:
@@ -59,7 +62,7 @@ def openFile():
     try:
         with f:
             t = f.read()
-    except UnicodeDecodeError:
+    except UnicodeDecodeError as e:
         showerror("Open Failed", "Could not open file. Please ensure it is a valid text file.")
         return
     except OSError as e:
@@ -68,8 +71,11 @@ def openFile():
     text.delete("1.0", tk.END)
     text.insert("1.0", t)     
     user_filepath = f.name
+    backup_filepath = os.path.join(save_folder, os.path.basename(user_filepath))
     text.edit_reset()
+    autosave_fails = 0
     setWindowName(os.path.basename(f.name))
+    scheduleAutosave()
     
 def changeFont(changed_font):
     global font
@@ -83,16 +89,12 @@ def changeFontSize(changed_font_size):
 
 def zoomIn(event=None):
     global font_size
-    if font_size >= 100:
-        return
-    font_size += max(2, int(font_size / 10))
+    font_size = min(font_size + max(2, int(font_size / 10)), 100)
     text.config(font=(font, font_size))
 
 def zoomOut(event=None):
     global font_size
-    if font_size <= 8:
-        return
-    font_size -= max(2, int(font_size / 10))
+    font_size = max(font_size - max(2, int(font_size / 10)), 8)
     text.config(font=(font, font_size))
 
 def undo():
@@ -118,7 +120,7 @@ def changeMode(change_to):
     current_mode = change_to
 
 def about():
-    showinfo(title="About", message="This is Text Party, a simple text editor where you can join your friends or colleagues to collaborate in one single file.\n\nCreated by: Osaidii (Muhammad Osaid Hassan)\nVersion: 1.0\n\nFor more information, visit: https://github.com/Osaidii/text-party")
+    showinfo(title="About", message="This is Text Party, a simple text editor where you can join your friends or colleagues to collaborate in one single file. Text Party does not store any of your data on its servers, except the bare minimum required to connect you to your part members..\n\nCreated by: Osaidii (Muhammad Osaid Hassan)\nVersion: 1.0\n\nFor more information, visit: https://github.com/Osaidii/text-party")
 
 def shortcuts():
     window = tk.Toplevel(root)
@@ -140,10 +142,7 @@ def shortcuts():
         ("Paste", "Ctrl + V"),
         ("Zoom In", "Ctrl + 8"),
         ("Zoom Out", "Ctrl + 9"),
-        ("Reset Zoom", "Ctrl + 0"),
-        ("Remove", "Ctrl + R"),
-        ("Join", "Ctrl + J"),
-        ("Leave", "Ctrl + L"),
+        ("Reset Zoom", "Ctrl + 0")
     ]
     for row, (action, shortcut) in enumerate(shortcuts, start = 1):
         tk.Label(window, text=action, font=("Arial", 12)).grid(row=row, column=0, padx=20, pady=5)
@@ -166,57 +165,108 @@ def aboutParty():
 # # # # #     Save Functions 
 
 def saveFile():
-    global backup_filepath, user_filepath
+    global backup_filepath, user_filepath, autosave_fails, backup_filepath
     if user_filepath == "":
-        saveAs()
-        return False
+        return saveAs()
     t = text.get("1.0", "end-1c")
+    try:
+        with open(backup_filepath, "w", encoding="utf-8") as b:
+            b.write(t)
+    except (OSError, UnicodeEncodeError) as e:
+        showerror("Backup Failed", "Autosave backup has failed.", detail=str(e))
     try:
         with open(user_filepath, "w", encoding="utf-8") as f:
             f.write(t)
-            return True
-    except OSError as e:
+        autosave_fails = 0
+        scheduleAutosave()
+        return True
+    except (OSError, UnicodeEncodeError) as e:
         showerror("Save Failed", str(e))
         return False
 
+
 def saveAs():
-    global backup_filepath, user_filepath
+    global backup_filepath, user_filepath, autosave_fails, backup_filepath
     f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder, encoding="utf-8")
     if f == None:
         return False
     t = text.get("1.0", "end-1c")
+    user_filepath = f.name
+    backup_filepath = os.path.join(save_folder, os.path.basename(user_filepath))
     try:
-        f.write(t)
-        f.close()
-        user_filepath = f.name
+        with open(backup_filepath, "w", encoding="utf-8") as b:
+            b.write(t)
+    except (OSError, UnicodeEncodeError) as e:
+        showerror("Backup Failed", "Autosave backup has failed.", detail=str(e))
+    try:
+        with f:
+            f.write(t)
         setWindowName(os.path.basename(f.name))
-        text.after(120000, autosave)
+        autosave_fails = 0
+        scheduleAutosave()
         return True
-    except:
-        showerror(title="Oops!", message="Unable to save file...")
+    except (OSError, UnicodeEncodeError) as e:
+        showerror(title="Oops!", message="Unable to save file...", detail=str(e))
         return False
 
+def cancelAutosave():
+    global autosave_job
+    if autosave_job is not None:
+        text.after_cancel(autosave_job)
+        autosave_job = None
+
+def scheduleAutosave():
+    global autosave_job
+    cancelAutosave()
+    autosave_job = text.after(120000, autosave)
+    
 def autosave():
-    global user_filepath, autosave_fails
-    if user_filepath == "":
+    global user_filepath, autosave_fails, autosave_job, backup_filepath
+    autosave_job = None
+    if user_filepath == "" or not root.winfo_exists():
         return
     t = text.get("1.0", "end-1c")
     try:
+        with open(backup_filepath, "w", encoding="utf-8") as b:
+            b.write(t)
+    except (OSError, UnicodeEncodeError) as e:
+        showerror("Backup Failed", "Autosave backup has failed.", detail=str(e))
+    try:
         with open(user_filepath, "w", encoding="utf-8") as f:
             f.write(t)
-    except OSError as e:
-        showerror("Autosave Failed", str(e))
+        autosave_fails = 0
+    except (OSError, UnicodeEncodeError) as e:
         autosave_fails += 1
-    if autosave_fails >= 3:
-        showerror("Autosave Failed", "Autosave has failed 3 times and is suspended. Please restart the application if you want to continue using it.")
-    else:
-        text.after(120000, autosave)
+        if autosave_fails >= 3:
+            showerror("Autosave Failed", "Autosave has failed 3 times and is suspended. A restart or manual save will resume autosave functionality.", detail=str(e))
+            return
+        showerror("Autosave Failed", str(e))
+    autosave_job = text.after(120000, autosave)
     
 def askUserToSave():
-    return False
+    answer = askyesnocancel("Save File", "Do you want to save the file? It is currently unsaved.")
+    match answer:
+        case True:
+            return saveFile()
+        case False:
+            return True
+        case None:
+            return False
 
 def isFileSaved():
-    return True
+    global user_filepath
+    if user_filepath == "":
+        return False
+    try:
+        if not os.path.exists(user_filepath):
+            return False
+        with open(user_filepath, "r", encoding="utf-8") as f:
+            saved_text = f.read()
+        current_text = text.get("1.0", "end-1c")
+        return current_text == saved_text
+    except (FileNotFoundError, OSError, TypeError, UnicodeDecodeError):
+        return False
+
 
 # # # # #     Software Loop
 
