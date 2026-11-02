@@ -7,12 +7,14 @@ import socket
 HOST = "127.0.0.1"
 PORT = 3467
 
+LOCK_PORT = 3468
+instance_lock_socket = None
+
 #
 #with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 #    s.connect((HOST, PORT))
 #    s.sendall(b"Hello, server!")
 #    data = s.recv(1024)
-
 #print(f"Received {data!r} from server")
 
 user_filepath = ""
@@ -74,7 +76,7 @@ def openFile():
         continue_forward = askUserToSave()
         if not continue_forward:
             return
-    f = askopenfile(mode='r', encoding='utf-8', filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+    f = askopenfile(mode='r', filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
     if f is None:
         return
     try:
@@ -115,6 +117,11 @@ def zoomOut(event=None):
     font_size = max(font_size - max(2, int(font_size / 10)), 8)
     text.config(font=(font, font_size))
 
+def zoomReset(event=None):
+    global font_size
+    font_size = default_font_size
+    text.config(font=(font, font_size))
+
 def undo():
     try:
         text.edit_undo()
@@ -138,7 +145,7 @@ def changeMode(change_to):
     current_mode = change_to
 
 def about():
-    showinfo(title="About", message="This is Text Party, a simple text editor where you can join your friends or colleagues to collaborate in one single file. Text Party does not store any of your data on its servers, except the bare minimum required to connect you to your party members..\n\nCreated by: Osaidii (Muhammad Osaid Hassan)\nVersion: 1.0\n\nFor more information, visit: https://github.com/Osaidii/text-party")
+    showinfo(title="About", message="This is Text Party, a simple text editor where you can join your friends or colleagues to collaborate in one single file. Text Party does not store any of your data on its servers, except the bare minimum required to connect you to your party members.\n\nCreated by: Osaidii (Muhammad Osaid Hassan)\nVersion: 1.0\n\nFor more information, visit: https://github.com/Osaidii/Text-Party")
 
 def shortcuts():
     window = tk.Toplevel(root)
@@ -176,6 +183,27 @@ def onClose():
                 return
     root.destroy()
 
+def acquireInstanceLock():
+    global _instance_lock_socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind((HOST, LOCK_PORT))
+        s.listen(1)
+        _instance_lock_socket = s
+        return True
+    except OSError:
+        try: s.close()
+        except OSError: pass
+        return False
+
+if not acquireInstanceLock():
+    import sys
+    _r = tk.Tk(); _r.withdraw()
+    showerror("Text Party", "Text Party is already running.\n""Only one instance can run at a time.")
+    _r.destroy()
+    sys.exit(0)
+
+
 
 # # # # #     Party Functions
 
@@ -195,7 +223,7 @@ def createParty():
 
 def saveFile():
     global backup_filepath, user_filepath, autosave_fails
-    if user_filepath == "":
+    if not isFileSaved():
         return saveAs()
     t = text.get("1.0", "end-1c")
     try:
@@ -215,7 +243,7 @@ def saveFile():
 
 def saveAs():
     global backup_filepath, user_filepath, autosave_fails
-    f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder, encoding="utf-8")
+    f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder, filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
     if f == None:
         return False
     t = text.get("1.0", "end-1c")
@@ -240,14 +268,22 @@ def saveAs():
 def cancelAutosave():
     global autosave_job
     if autosave_job is not None:
-        text.after_cancel(autosave_job)
+        try:
+            text.after_cancel(autosave_job)
+        except tk.TclError:
+            pass
         autosave_job = None
 
 def scheduleAutosave():
     global autosave_job
     cancelAutosave()
-    autosave_job = text.after(120000, autosave)
-    
+    if isFileSaved():
+        return
+    try:
+        autosave_job = text.after(120000, autosave)
+    except tk.TclError:
+        autosave_job = None
+
 def autosave():
     global user_filepath, autosave_fails, autosave_job, backup_filepath
     autosave_job = None
@@ -307,15 +343,19 @@ newFile()
 root.minsize(width=400, height=400)
 root.protocol("WM_DELETE_WINDOW", onClose)
 text.bind("<Control-s>", lambda event: saveFile())
+text.bind("<Control-S>", lambda event: saveFile())
 text.bind("<Control-Shift-S>", lambda event: saveAs())
+text.bind("<Control-Shift-s>", lambda event: saveAs())
 text.bind("<Control-n>", lambda event: newFile())
+text.bind("<Control-N>", lambda event: newFile())
 text.bind("<Control-o>", lambda event: openFile())
+text.bind("<Control-O>", lambda event: openFile())
 text.bind("<Control-0>", lambda event: changeFontSize(default_font_size))
 text.bind("<Control-8>", zoomIn)
 text.bind("<Control-9>", zoomOut)
 
 menubar = tk.Menu(root, font=("Arial"))
-filemenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
+filemenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 150)))
 filemenu.add_command(label="New", command=newFile) 
 filemenu.add_command(label="Open", command=openFile)
 filemenu.add_command(label="Save", command=saveFile)
@@ -323,7 +363,7 @@ filemenu.add_command(label="Save As...", command=saveAs)
 filemenu.add_separator()
 filemenu.add_command(label="Quit", command=onClose)
 menubar.add_cascade(label="File", menu=filemenu)
-editmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
+editmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 150)))
 editmenu.add_command(label="Undo", command=undo) 
 editmenu.add_command(label="Redo", command=redo)
 editmenu.add_separator()
@@ -331,7 +371,7 @@ editmenu.add_command(label="Cut", command=lambda: text.event_generate("<<Cut>>")
 editmenu.add_command(label="Copy", command=lambda: text.event_generate("<<Copy>>"))
 editmenu.add_command(label="Paste", command=lambda: text.event_generate("<<Paste>>"))
 menubar.add_cascade(label="Edit", menu=editmenu)
-partymenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
+partymenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 150)))
 partymenu.add_command(label="About", command=aboutParty) 
 partymenu.add_separator()
 partymenu.add_command(label="Start Party", command=None)
@@ -341,23 +381,19 @@ partymenu.add_command(label="Join", command=None)
 partymenu.add_command(label="Leave", command=None)
 partymenu.add_command(label="See Members", command=None)
 menubar.add_cascade(label="Party", menu=partymenu)
-fontmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
+fontmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 150)))
 for font_name in ("Arial", "Times New Roman", "Courier New", "Verdana", "Tahoma", "Georgia", "Trebuchet MS", "Comic Sans MS", "Impact", "Calibri", "Consolas", "Segoe UI"):
     fontmenu.add_command(label=font_name, command=lambda f=font_name: changeFont(f))
 menubar.add_cascade(label="Font", menu=fontmenu)
-sizemenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
-for size in (8, 10, 12, 14, 16, 18, 20, 24, 32, 40, 48, 56, 70):
-    sizemenu.add_command(label=size, command=lambda s=size: changeFontSize(s))
-menubar.add_cascade(label="Font Size", menu=sizemenu)
-viewmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
+viewmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 150)))
 viewmenu.add_command(label="Zoom In", command=zoomIn)
 viewmenu.add_command(label="Zoom Out", command=zoomOut)
-viewmenu.add_command(label="Reset Zoom", command=lambda: changeFontSize(default_font_size))
+viewmenu.add_command(label="Reset Zoom", command=lambda: zoomReset())
 viewmenu.add_separator()
 viewmenu.add_command(label="Light Mode", command=lambda: changeMode("Light"))
 viewmenu.add_command(label="Dark Mode", command=lambda: changeMode("Dark"))
 menubar.add_cascade(label="View", menu=viewmenu) 
-aboutmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 200)))
+aboutmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 150)))
 aboutmenu.add_command(label="About", command=about)
 aboutmenu.add_separator()
 aboutmenu.add_command(label="Shortcuts", command=shortcuts)
@@ -366,4 +402,6 @@ root.config(menu=menubar)
 
 root.mainloop()
 
-# Searching and Replacing, Word Count can be added in the future updates.
+# Supporting Multiple OSes and Server Logic left.
+
+# Searching and Replacing, Word Count, Drag and Drop Text can be added in the future updates.

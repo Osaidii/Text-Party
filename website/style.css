@@ -20,6 +20,7 @@ body {
 .container {
   display: flex;
   height: calc(100vh - 70px);
+  overflow: hidden;
 }
 
 .right {
@@ -29,17 +30,20 @@ body {
   flex-direction: column;
   justify-content: center;
   gap: 0.2em;
+  min-width: 0;
 }   
 
 .left {
   flex: 1.5;
   flex-direction: column; 
   display: flex;
+  min-width: 0;
 }   
 
 .top {
   flex: 1;
   background-color: #ffffff;
+  min-width: 0;
 }   
 
 .down {
@@ -54,6 +58,19 @@ body {
   margin-top: 0.15em;
   font-family: 'Miller Salt', sans-serif;
   font-size: 13.7em;
+  min-width: 0;
+}
+
+.desc {
+  color: #000000;
+  text-align: left;
+  margin: 0em;
+  font-family: 'Miller Salt', sans-serif;
+  margin-left: 5em;
+  margin-top: -3em;
+  letter-spacing: 0.075em;
+  word-spacing: 0.2em;
+  font-size: 2em;
 }
 
 .bar {
