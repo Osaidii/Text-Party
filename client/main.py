@@ -7,12 +7,13 @@ import socket
 HOST = "127.0.0.1"
 PORT = 3467
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.connect((HOST, PORT))
-    s.sendall(b"Hello, server!")
-    data = s.recv(1024)
+#
+#with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+#    s.connect((HOST, PORT))
+#    s.sendall(b"Hello, server!")
+#    data = s.recv(1024)
 
-print(f"Received {data!r} from server")
+#print(f"Received {data!r} from server")
 
 user_filepath = ""
 backup_filepath = ""
@@ -34,7 +35,9 @@ screen_height = root.winfo_screenheight()
 
 font_size = int(screen_height / 80)
 default_font_size = font_size
-text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=True, maxundo=-1)
+text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=True, maxundo=-1, padx=10, pady=10, wrap=tk.WORD)
+text.tag_configure("margins", rmargin=15)
+text.tag_add("margins", "1.0", "end")
 text.pack()
 text.edit_separator()
 
@@ -272,7 +275,11 @@ def askUserToSave():
     answer = askyesnocancel("Save File", "Do you want to save the file? It is currently unsaved.")
     match answer:
         case True:
-            return saveFile()
+            match isFileSaved():
+                case True:
+                    return saveFile()
+                case False:
+                    return saveAs()
         case False:
             return True
         case None:
