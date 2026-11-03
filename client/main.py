@@ -11,11 +11,6 @@ PORT = 3467
 LOCK_PORT = 3468
 instance_lock_socket = None
 
-
-#    s.sendall(b"Hello, server!")
-#    data = s.recv(1024)
-#print(f"Received {data!r} from server")
-
 user_filepath = ""
 backup_filepath = ""
 autosave_fails = 0
@@ -23,10 +18,10 @@ autosave_job = None
 partymode = False
 party_socket = None
 party_code = 0
+party_password = ""
+party_name = ""
 font = "Arial"
 current_mode = "Dark"
-
-partymode = False
 light_color = "#E4E4E4"
 dark_color = "#303030"
 
@@ -218,7 +213,7 @@ def aboutParty():
     showinfo(title="About Party", message="A Party can be described as a group or a room which when used, can allow other joined members to edit and update the same text file.")
 
 def createParty():
-    global partymode, party_code, party_socket
+    global partymode, party_code, party_socket, party_password, party_name
     if partymode:
         showerror("In Party Mode", "You are already in a party. Please leave the current party first.")
         return
@@ -227,12 +222,11 @@ def createParty():
         party_socket.connect((HOST, PORT))
         party_socket.sendall(b"handshake")
         data = party_socket.recv(1024)
-        print(f"Server Reply: {data}")
     except ConnectionRefusedError:
         showerror("Connection Failed", "Could not connect to the server. Please try later or report to the developer.")
         return
     win = tk.Toplevel(root)
-    win.title("Join Party")
+    win.title("Create Party")
     win.geometry("300x200")
     win.resizable(False, False)
     win.transient(root)
@@ -247,6 +241,7 @@ def createParty():
     tk.Entry(win, textvariable=name_var, width=25).grid(row=3, column=1, padx=10, pady=(15, 5))
     result = {"password": None, "name": None}
     def submit(event=None):
+        global party_password, party_name
         n = name_var.get().strip()
         p = pw_var.get()
         if not p:
@@ -255,23 +250,22 @@ def createParty():
         if not n:
             showerror("Missing", "Please enter a name.", parent=win)
             return
-        result["password"] = p
-        result["name"] = n
+        party_password = p
+        party_name = n
         win.destroy()
     tk.Button(win, text="Create Party", command=submit, width=30, relief="solid", borderwidth=1, bd=1).grid(row=4, column=0, columnspan=2, pady=15, padx=15)
     win.bind("<Return>", submit)
     win.bind("<Escape>", lambda e: win.destroy())
     name_var.set("")
     win.wait_window()
-    if result["name"] is None:
+    if party_name is None:
         return
-    party_socket.sendall(f"create:{party_code}:{result['password']}:{result['name']}".encode("utf-8"))
+    party_socket.sendall(f"create:{party_code}:{party_password}:{party_name}".encode("utf-8"))
     data = party_socket.recv(1024)
-    print(f"Server Reply: {data}")
-    if data == b"Party Created":
+    if data == b"party created":
         partymode = True
         setWindowName(f"Party {party_code} | Text Party")
-        showinfo("Party Created", f"Your party has been created successfully.\n\nJoin Code: {party_code}\nPassword: {result['password']}")
+        showinfo("Party Created", f"Your party has been created successfully.\n\nJoin Code: {party_code}\nPassword: {party_password}")
     else:
         showerror("Party Creation Failed", f"Could not create party. Server replied: {data.decode('utf-8')}")
         party_socket.close()
@@ -279,9 +273,72 @@ def createParty():
         return
 
 def destroyParty():
+    global partymode, party_socket, party_code, party_password, party_name
     if not partymode:
         showerror("Not in Party Mode", "You are not currently in a party.")
         return
+    win = tk.Toplevel(root)
+    win.title("Destroy Party")
+    win.geometry("300x160")
+    win.resizable(False, False)
+    win.transient(root)
+    win.grab_set()
+    tk.Label(win, text=f"Join Code: {party_code}", font=("Arial", 16)).grid(row=0, columnspan=2, padx=10, pady=(15, 10))
+    tk.Label(win, text="Password:", font=("Arial", 14)).grid(row=2, column=0, padx=10, pady=5, sticky="e")
+    pw_var = tk.StringVar()
+    tk.Entry(win, textvariable=pw_var, show="*", width=25).grid(row=2, column=1, padx=10, pady=5)
+    result = {"password": None}
+    def submit(event=None):
+        global party_password, party_name
+        p = pw_var.get()
+        if not p:
+            showerror("Missing", "Please enter a password.", parent=win)
+            return
+        result["password"] = p
+        win.destroy()
+    tk.Button(win, text="Destroy Party", command=submit, width=30, relief="solid", borderwidth=1, bd=1).grid(row=4, column=0, columnspan=2, pady=15, padx=15)
+    win.bind("<Return>", submit)
+    win.bind("<Escape>", lambda e: win.destroy())
+    win.wait_window()
+    try:
+        if result["password"] != party_password:
+            return
+        askyesnocancel_result = askyesnocancel("Confirm Destruction", "Are you sure you want to destroy the party? This action cannot be undone. Memebers will also be kicked")
+        if askyesnocancel_result is None:
+            return
+        if not askyesnocancel_result:
+            return
+        party_socket.sendall(f"destroy:{party_code}:{result['password']}:{party_name}".encode("utf-8"))
+        data = party_socket.recv(1024)
+        if data == b"party destroyed":
+            partymode = False
+            setWindowName("Untitled | Text Party")
+            showinfo("Party Destroyed", "Your party has been destroyed successfully.")
+        elif data == b"invalid code":
+            showerror("Party Destruction Failed", "Party was not found.")
+        elif data == b"invalid host":
+            showerror("Party Destruction Failed", "You are not the host of this party. Only the host can destroy the party.")
+        else:
+            showerror("Party Destruction Failed", f"Could not destroy party. Server replied: {data.decode('utf-8')}")
+    except Exception as e:
+        showerror("Party Destruction Failed", f"Could not destroy party. Error: {str(e)}")
+
+def leaveParty():
+    global partymode, party_socket, party_code, party_password, party_name
+    if not partymode:
+        showerror("Not in Party Mode", "You are not currently in a party.")
+        return
+    try:
+        party_socket.sendall(f"leave:{party_code}:{party_password}:{party_name}".encode("utf-8"))
+        data = party_socket.recv(1024)
+        if data == b"left party":
+            partymode = False
+            setWindowName("Untitled | Text Party")
+            showinfo("Left Party", "You have left the party successfully.")
+        else:
+            showerror("Leave Party Failed", f"Could not leave party. Server replied: {data.decode('utf-8')}")
+    except Exception as e:
+        showerror("Leave Party Failed", f"Could not leave party. Error: {str(e)}")
 
 
 # # # # #     Save Functions 
