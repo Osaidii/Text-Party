@@ -3,6 +3,7 @@ import os
 from tkinter.filedialog import askopenfile, asksaveasfile
 from tkinter.messagebox import showinfo, showerror, askyesnocancel
 import socket
+import secrets
 
 HOST = "127.0.0.1"
 PORT = 3467
@@ -10,9 +11,7 @@ PORT = 3467
 LOCK_PORT = 3468
 instance_lock_socket = None
 
-#
-#with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-#    s.connect((HOST, PORT))
+
 #    s.sendall(b"Hello, server!")
 #    data = s.recv(1024)
 #print(f"Received {data!r} from server")
@@ -21,14 +20,38 @@ user_filepath = ""
 backup_filepath = ""
 autosave_fails = 0
 autosave_job = None
+partymode = False
+party_socket = None
+party_code = 0
 font = "Arial"
 current_mode = "Dark"
+
 partymode = False
 light_color = "#E4E4E4"
 dark_color = "#303030"
 
 save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Text Party Saves")
 os.makedirs(save_folder, exist_ok=True)
+
+def acquireInstanceLock():
+    global _instance_lock_socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind((HOST, LOCK_PORT))
+        s.listen(1)
+        _instance_lock_socket = s
+        return True
+    except OSError:
+        try: s.close()
+        except OSError: pass
+        return False
+
+if not acquireInstanceLock():
+    import sys
+    _r = tk.Tk(); _r.withdraw()
+    showerror("Text Party", "Text Party is already running.\n""Only one instance can run at a time.")
+    _r.destroy()
+    sys.exit(0)
 
 root = tk.Tk()
 
@@ -37,7 +60,7 @@ screen_height = root.winfo_screenheight()
 
 font_size = int(screen_height / 80)
 default_font_size = font_size
-text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=True, maxundo=-1, padx=10, pady=10, wrap=tk.WORD)
+text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=False, maxundo=-1, padx=10, pady=10, wrap=tk.WORD)
 text.tag_configure("margins", rmargin=15)
 text.tag_add("margins", "1.0", "end")
 text.pack()
@@ -52,7 +75,7 @@ def setWindowName(name: str):
 
 def newFile():
     if partymode:
-        showerror("New File Disabled", "You cannot create a new file while in a party. Please leave the party first.")
+        showerror("In Party Mode", "You cannot create a new file while in a party. Please leave the party first.")
         return
     global backup_filepath, user_filepath, autosave_fails
     if text.get("1.0", "end-1c").strip() != "" and not isFileSaved():
@@ -61,16 +84,16 @@ def newFile():
             return
     setWindowName("Untitled")
     backup_filepath = ""
+    text.delete("1.0", tk.END)
     text.edit_reset()
     user_filepath = ""
-    text.delete("1.0", tk.END)
     autosave_fails = 0
     cancelAutosave()
 
 def openFile():
     global user_filepath, backup_filepath, autosave_fails
     if partymode:
-        showerror("Open File Disabled", "You cannot open a file while in a party. Please leave the party first.")
+        showerror("In Party Mode", "You cannot open a file while in a party. Please leave the party first.")
         return
     if text.get("1.0", "end-1c").strip() != "" and not isFileSaved():
         continue_forward = askUserToSave()
@@ -175,7 +198,7 @@ def shortcuts():
 
 def onClose():
     if partymode:
-        showerror("In Party", "You cannot close the program while in a party. Please leave the party first.")
+        showerror("In Party Mode", "You cannot close the program while in a party. Please leave the party first.")
         return
     if text.get("1.0", "end-1c").strip() != "":
         if not isFileSaved():
@@ -183,25 +206,9 @@ def onClose():
                 return
     root.destroy()
 
-def acquireInstanceLock():
-    global _instance_lock_socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        s.bind((HOST, LOCK_PORT))
-        s.listen(1)
-        _instance_lock_socket = s
-        return True
-    except OSError:
-        try: s.close()
-        except OSError: pass
-        return False
-
-if not acquireInstanceLock():
-    import sys
-    _r = tk.Tk(); _r.withdraw()
-    showerror("Text Party", "Text Party is already running.\n""Only one instance can run at a time.")
-    _r.destroy()
-    sys.exit(0)
+def _undo_separator_on_key(event):
+    text.edit_separator()
+    return None
 
 
 
@@ -211,12 +218,70 @@ def aboutParty():
     showinfo(title="About Party", message="A Party can be described as a group or a room which when used, can allow other joined members to edit and update the same text file.")
 
 def createParty():
-    global partymode
+    global partymode, party_code, party_socket
     if partymode:
-        showerror("Already in Party", "You are already in a party. Please leave the current party first.")
+        showerror("In Party Mode", "You are already in a party. Please leave the current party first.")
         return
-    partymode = True
-    
+    try:
+        party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        party_socket.connect((HOST, PORT))
+        party_socket.sendall(b"handshake")
+        data = party_socket.recv(1024)
+        print(f"Server Reply: {data}")
+    except ConnectionRefusedError:
+        showerror("Connection Failed", "Could not connect to the server. Please try later or report to the developer.")
+        return
+    win = tk.Toplevel(root)
+    win.title("Join Party")
+    win.geometry("300x200")
+    win.resizable(False, False)
+    win.transient(root)
+    win.grab_set()
+    party_code = f"{secrets.randbelow(1_000_000):06d}"
+    tk.Label(win, text=f"Join Code: {party_code}", font=("Arial", 16)).grid(row=0, columnspan=2, padx=10, pady=(15, 10))
+    tk.Label(win, text="Password:", font=("Arial", 14)).grid(row=2, column=0, padx=10, pady=5, sticky="e")
+    pw_var = tk.StringVar()
+    tk.Entry(win, textvariable=pw_var, show="*", width=25).grid(row=2, column=1, padx=10, pady=5)
+    tk.Label(win, text="Name:", font=("Arial", 14)).grid(row=3, column=0, padx=10, pady=(15, 5), sticky="e")
+    name_var = tk.StringVar()
+    tk.Entry(win, textvariable=name_var, width=25).grid(row=3, column=1, padx=10, pady=(15, 5))
+    result = {"password": None, "name": None}
+    def submit(event=None):
+        n = name_var.get().strip()
+        p = pw_var.get()
+        if not p:
+            showerror("Missing", "Please enter a password.", parent=win)
+            return
+        if not n:
+            showerror("Missing", "Please enter a name.", parent=win)
+            return
+        result["password"] = p
+        result["name"] = n
+        win.destroy()
+    tk.Button(win, text="Create Party", command=submit, width=30, relief="solid", borderwidth=1, bd=1).grid(row=4, column=0, columnspan=2, pady=15, padx=15)
+    win.bind("<Return>", submit)
+    win.bind("<Escape>", lambda e: win.destroy())
+    name_var.set("")
+    win.wait_window()
+    if result["name"] is None:
+        return
+    party_socket.sendall(f"create:{party_code}:{result['password']}:{result['name']}".encode("utf-8"))
+    data = party_socket.recv(1024)
+    print(f"Server Reply: {data}")
+    if data == b"Party Created":
+        partymode = True
+        setWindowName(f"Party {party_code} | Text Party")
+        showinfo("Party Created", f"Your party has been created successfully.\n\nJoin Code: {party_code}\nPassword: {result['password']}")
+    else:
+        showerror("Party Creation Failed", f"Could not create party. Server replied: {data.decode('utf-8')}")
+        party_socket.close()
+        party_socket = None
+        return
+
+def destroyParty():
+    if not partymode:
+        showerror("Not in Party Mode", "You are not currently in a party.")
+        return
 
 
 # # # # #     Save Functions 
@@ -353,6 +418,7 @@ text.bind("<Control-O>", lambda event: openFile())
 text.bind("<Control-0>", lambda event: changeFontSize(default_font_size))
 text.bind("<Control-8>", zoomIn)
 text.bind("<Control-9>", zoomOut)
+text.bind("<Key>", _undo_separator_on_key)
 
 menubar = tk.Menu(root, font=("Arial"))
 filemenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 150)))
@@ -374,12 +440,14 @@ menubar.add_cascade(label="Edit", menu=editmenu)
 partymenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 150)))
 partymenu.add_command(label="About", command=aboutParty) 
 partymenu.add_separator()
-partymenu.add_command(label="Start Party", command=None)
-partymenu.add_command(label="Stop Party", command=None)
+partymenu.add_command(label="Create Party", command=createParty)
+partymenu.add_command(label="Destroy Party", command=destroyParty)
 partymenu.add_command(label="Remove", command=None)
 partymenu.add_command(label="Join", command=None)
 partymenu.add_command(label="Leave", command=None)
+partymenu.add_separator()
 partymenu.add_command(label="See Members", command=None)
+partymenu.add_command(label="About Current Party", command=None)
 menubar.add_cascade(label="Party", menu=partymenu)
 fontmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 150)))
 for font_name in ("Arial", "Times New Roman", "Courier New", "Verdana", "Tahoma", "Georgia", "Trebuchet MS", "Comic Sans MS", "Impact", "Calibri", "Consolas", "Segoe UI"):
@@ -402,6 +470,6 @@ root.config(menu=menubar)
 
 root.mainloop()
 
-# Supporting Multiple OSes and Server Logic left.
+# Supporting Multiple OSes and Updating, Leaving, Joining, Kicking, Destryoing, and info of Parties Logic left.
 
 # Searching and Replacing, Word Count, Drag and Drop Text can be added in the future updates.
