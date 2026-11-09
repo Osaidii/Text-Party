@@ -7,8 +7,10 @@ import secrets
 
 HOST = "127.0.0.1"
 PORT = 3467
-
 LOCK_PORT = 3468
+LIGHTCOLOR = "#E4E4E4"
+DARKCOLOR = "#303030"
+
 instance_lock_socket = None
 
 user_filepath = ""
@@ -22,8 +24,6 @@ party_password = ""
 party_name = ""
 font = "Arial"
 current_mode = "Dark"
-light_color = "#E4E4E4"
-dark_color = "#303030"
 
 save_folder = os.path.join(os.path.expanduser("~"), "Documents", "Text Party Saves")
 os.makedirs(save_folder, exist_ok=True)
@@ -55,7 +55,7 @@ screen_height = root.winfo_screenheight()
 
 font_size = int(screen_height / 80)
 default_font_size = font_size
-text = tk.Text(root, width=400, height=400, bg=dark_color, fg=light_color, font=(font, font_size), undo=True, autoseparators=False, maxundo=-1, padx=10, pady=10, wrap=tk.WORD)
+text = tk.Text(root, width=400, height=400, bg=DARKCOLOR, fg=LIGHTCOLOR, font=(font, font_size), undo=True, autoseparators=False, maxundo=-1, padx=10, pady=10, wrap=tk.WORD)
 text.tag_configure("margins", rmargin=15)
 text.tag_add("margins", "1.0", "end")
 text.pack()
@@ -157,9 +157,9 @@ def changeMode(change_to):
     if change_to == current_mode:
         return
     if change_to == "Light":
-        text.config(bg=light_color, fg=dark_color)
+        text.config(bg=LIGHTCOLOR, fg=DARKCOLOR)
     if change_to == "Dark":
-        text.config(fg=light_color, bg=dark_color) 
+        text.config(fg=LIGHTCOLOR, bg=DARKCOLOR) 
     current_mode = change_to
 
 def about():
@@ -217,12 +217,17 @@ def createParty():
     if partymode:
         showerror("In Party Mode", "You are already in a party. Please leave the current party first.")
         return
+    party_code = None
+    party_password = None
+    party_name = None
     try:
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.connect((HOST, PORT))
         party_socket.sendall(b"handshake")
         data = party_socket.recv(1024)
     except ConnectionRefusedError:
+        party_socket.close()
+        party_socket = None
         showerror("Connection Failed", "Could not connect to the server. Please try later or report to the developer.")
         return
     win = tk.Toplevel(root)
@@ -259,10 +264,17 @@ def createParty():
     name_var.set("")
     win.wait_window()
     if party_name is None:
+        party_socket.close()
+        party_socket = None
         return
     party_socket.sendall(f"create:{party_code}:{party_password}:{party_name}".encode("utf-8"))
     data = party_socket.recv(1024)
-    if data == b"party created":
+    if data == b"Code Taken":
+        showerror("Party Creation Failed", "Party code collision. Please try again.")
+        party_socket.close()
+        party_socket = None
+        return
+    if data == b"Party Created":
         partymode = True
         setWindowName(f"Party {party_code} | Text Party")
         showinfo("Party Created", f"Your party has been created successfully.\n\nJoin Code: {party_code}\nPassword: {party_password}")
@@ -306,22 +318,148 @@ def destroyParty():
         askyesnocancel_result = askyesnocancel("Confirm Destruction", "Are you sure you want to destroy the party? This action cannot be undone. Memebers will also be kicked")
         if askyesnocancel_result is None:
             return
-        if not askyesnocancel_result:
-            return
         party_socket.sendall(f"destroy:{party_code}:{result['password']}:{party_name}".encode("utf-8"))
         data = party_socket.recv(1024)
-        if data == b"party destroyed":
+        if data == b"Party Destroyed":
             partymode = False
             setWindowName("Untitled | Text Party")
             showinfo("Party Destroyed", "Your party has been destroyed successfully.")
-        elif data == b"invalid code":
+            party_socket.close()
+            party_socket = None
+            party_code = 0
+            party_password = ""
+            party_name = ""
+        elif data == b"Invalid Code":
             showerror("Party Destruction Failed", "Party was not found.")
-        elif data == b"invalid host":
+        elif data == b"Invalid Host":
             showerror("Party Destruction Failed", "You are not the host of this party. Only the host can destroy the party.")
         else:
             showerror("Party Destruction Failed", f"Could not destroy party. Server replied: {data.decode('utf-8')}")
     except Exception as e:
         showerror("Party Destruction Failed", f"Could not destroy party. Error: {str(e)}")
+
+def removeMember():
+    global partymode, party_socket, party_code, party_password, party_name
+    if not partymode:
+        showerror("Not in Party Mode", "You are currently not in a party. You must be the host of a party to remove a member.")
+        return
+    win = tk.Toplevel(root)
+    win.title("Remove Member")
+    win.geometry("300x200")
+    win.resizable(False, False)
+    win.transient(root)
+    win.grab_set()
+    tk.Label(win, text="Remove Member:", font=("Arial", 14)).grid(row=1, column=0, padx=10, pady=(15, 5), sticky="e")
+    name_var = tk.StringVar()
+    tk.Entry(win, textvariable=name_var, width=25).grid(row=1, column=1, padx=10, pady=5)
+    result = {"target": None}
+    def submit(event=None):
+        global party_password, party_name
+        n = name_var.get().strip()
+        if not n:
+            showerror("Missing", "Please enter a name.", parent=win)
+            return
+        result["target"] = n
+        win.destroy()
+    tk.Button(win, text="Remove Member", command=submit, width=30, relief="solid", borderwidth=1, bd=1).grid(row=4, column=0, columnspan=2, pady=15, padx=15)
+    win.bind("<Return>", submit)
+    win.bind("<Escape>", lambda e: win.destroy())
+    win.wait_window()   
+    try:
+        party_socket.sendall(f"remove:{party_code}:{party_password}:{party_name}:{result['target']}".encode("utf-8"))
+        data = party_socket.recv(1024)
+        if data == b"Member Removed":
+            showinfo("Player Removed Succesfully", "The removed member will not be able to or get any update.")
+        elif data == b"Is Not Host":
+            showerror("Remove Member Failed", "You are not the host of this party.")
+        else:
+            showerror("Remove Member Failed", f"Could not Remove Member. Server replied: {data.decode('utf-8')}")
+    except Exception as e:
+        showerror("Remove Member Failed", f"Error: {str(e)}")
+
+def joinParty():
+    global partymode, party_socket, party_code, party_password, party_name
+    if partymode:
+        showerror("In Party Mode", "You already currently in a party. Leave the current party first before joining another.")
+        return
+    party_code = None
+    party_password = None
+    party_name = None
+    try:
+        party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        party_socket.connect((HOST, PORT))
+        party_socket.sendall(b"handshake")
+        data = party_socket.recv(1024)
+    except ConnectionRefusedError:
+        party_socket.close()
+        party_socket = None
+        showerror("Connection Failed", "Could not connect to the server. Please try later or report to the developer.")
+        return
+    win = tk.Toplevel(root)
+    win.title("Join Party")
+    win.geometry("300x200")
+    win.resizable(False, False)
+    win.transient(root)
+    win.grab_set()
+    tk.Label(win, text="Party Code:", font=("Arial", 14)).grid(row=1, column=0, padx=10, pady=(15, 5), sticky="e")
+    pc_var = tk.StringVar()
+    tk.Entry(win, textvariable=pc_var, width=25).grid(row=1, column=1, padx=10, pady=5)
+    tk.Label(win, text="Password:", font=("Arial", 14)).grid(row=2, column=0, padx=10, pady=5, sticky="e")
+    pw_var = tk.StringVar()
+    tk.Entry(win, textvariable=pw_var, show="*", width=25).grid(row=2, column=1, padx=10, pady=5)
+    tk.Label(win, text="Name:", font=("Arial", 14)).grid(row=3, column=0, padx=10, pady=(15, 5), sticky="e")
+    name_var = tk.StringVar()
+    tk.Entry(win, textvariable=name_var, width=25).grid(row=3, column=1, padx=10, pady=(15, 5))
+    result = {"code": None, "password": None, "name": None}
+    def submit(event=None):
+        global party_password, party_name
+        n = name_var.get().strip()
+        p = pw_var.get()
+        c = pc_var.get().strip()
+        if not c:
+            showerror("Missing", "Please enter a party code.", parent=win)
+            return
+        if not p:
+            showerror("Missing", "Please enter a password.", parent=win)
+            return
+        if not n:
+            showerror("Missing", "Please enter a name.", parent=win)
+            return
+        
+        result["code"] = c
+        result["password"] = p
+        result["name"] = n
+        win.destroy()
+    tk.Button(win, text="Join Party", command=submit, width=30, relief="solid", borderwidth=1, bd=1).grid(row=4, column=0, columnspan=2, pady=15, padx=15)
+    win.bind("<Return>", submit)
+    win.bind("<Escape>", lambda e: win.destroy())
+    win.wait_window()   
+    if result["code"] is None:
+        party_socket.close()
+        party_socket = None
+        return
+    try:
+        party_socket.sendall(f"join:{result['code']}:{result['password']}:{result['name']}".encode("utf-8"))
+        data = party_socket.recv(1024)
+        if data == b"Joined Party":
+            partymode = True
+            setWindowName(f"{result['name']} | Text Party")
+            showinfo("Joined Party", "You have joined the party successfully.")
+            party_code = result["code"]
+            party_password = result["password"]
+            party_name = result["name"]
+        elif data == b"Wrong Password" or data == b"Invalid Code":
+            showerror("Join Party Failed", "The party code or password is incorrect.")
+            party_socket.close()
+            party_socket = None
+        else:
+            showerror("Join Party Failed", f"Could not join party. Server replied: {data.decode('utf-8')}")
+            party_socket.close()
+            party_socket = None
+    except Exception as e:
+        showerror("Join Party Failed", f"Could not join party. Error: {str(e)}")
+        party_socket.close()
+        party_socket = None
 
 def leaveParty():
     global partymode, party_socket, party_code, party_password, party_name
@@ -331,21 +469,47 @@ def leaveParty():
     try:
         party_socket.sendall(f"leave:{party_code}:{party_password}:{party_name}".encode("utf-8"))
         data = party_socket.recv(1024)
-        if data == b"left party":
+        if data == b"Left Party":
             partymode = False
             setWindowName("Untitled | Text Party")
             showinfo("Left Party", "You have left the party successfully.")
+            party_socket.close()
+            party_socket = None
+            party_code = 0
+            party_password = ""
+            party_name = ""
+        elif data == b"Is Host":
+            showerror("Leave Party Failed", "You are the host of this party. You cannot leave the party without destroying it first.")
         else:
             showerror("Leave Party Failed", f"Could not leave party. Server replied: {data.decode('utf-8')}")
+            party_socket.close()
+            party_socket = None
     except Exception as e:
         showerror("Leave Party Failed", f"Could not leave party. Error: {str(e)}")
 
+def showPartyInfo():
+    global party_code, party_password, party_name
+    if not partymode:
+        showerror("Not in Party Mode", "You are not currently in a party.")
+        return
+    win = tk.Toplevel(root)
+    win.title("Party Information")
+    win.geometry("200x180")
+    win.resizable(False, False)
+    win.transient(root)
+    win.grab_set()
+    tk.Label(win, text=f"Join Code: {party_code}", font=("Arial", 14)).grid(row=0, columnspan=2, padx=10, pady=(15, 10))
+    tk.Label(win, text=f"Password: {party_password}", font=("Arial", 14)).grid(row=1, columnspan=2, padx=10, pady=(15, 10))
+    tk.Label(win, text=f"Name: {party_name}", font=("Arial", 14)).grid(row=2, columnspan=2, padx=10, pady=(15, 10))
+    win.bind("<Escape>", lambda e: win.destroy())
+    win.wait_window()
+    
 
 # # # # #     Save Functions 
 
 def saveFile():
     global backup_filepath, user_filepath, autosave_fails
-    if not isFileSaved():
+    if user_filepath == "":
         return saveAs()
     t = text.get("1.0", "end-1c")
     try:
@@ -399,17 +563,24 @@ def cancelAutosave():
 def scheduleAutosave():
     global autosave_job
     cancelAutosave()
-    if isFileSaved():
+    if user_filepath == "":
         return
     try:
         autosave_job = text.after(120000, autosave)
     except tk.TclError:
         autosave_job = None
-
+ 
 def autosave():
     global user_filepath, autosave_fails, autosave_job, backup_filepath
-    autosave_job = None
-    if user_filepath == "" or not root.winfo_exists():
+    if not root.winfo_exists() or user_filepath == "":
+        autosave_job = None
+        return
+    try:
+        autosave_job = text.after(120000, autosave)
+    except tk.TclError:
+        autosave_job = None
+        return
+    if isFileSaved():
         return
     t = text.get("1.0", "end-1c")
     try:
@@ -420,6 +591,7 @@ def autosave():
         autosave_fails += 1
         if autosave_fails >= 3:
             showerror("Autosave Failed", "Autosave has failed 3 times and is suspended. A restart or manual save will resume autosave functionality.", detail=str(e))
+            autosave_job = None
             return
         showerror("Autosave Failed", str(e))
     try:
@@ -427,7 +599,6 @@ def autosave():
             b.write(t)
     except (OSError, UnicodeEncodeError) as e:
         showerror("Backup Failed", "A backup has failed. Your save file has been saved.", detail=str(e))
-    autosave_job = text.after(120000, autosave)
     
 def askUserToSave():
     answer = askyesnocancel("Save File", "Do you want to save the file? It is currently unsaved.")
@@ -499,12 +670,12 @@ partymenu.add_command(label="About", command=aboutParty)
 partymenu.add_separator()
 partymenu.add_command(label="Create Party", command=createParty)
 partymenu.add_command(label="Destroy Party", command=destroyParty)
-partymenu.add_command(label="Remove", command=None)
-partymenu.add_command(label="Join", command=None)
-partymenu.add_command(label="Leave", command=None)
+partymenu.add_command(label="Join Party", command=joinParty)
+partymenu.add_command(label="Leave Party", command=leaveParty)
+partymenu.add_command(label="Remove Member", command=removeMember)
 partymenu.add_separator()
-partymenu.add_command(label="See Members", command=None)
-partymenu.add_command(label="About Current Party", command=None)
+partymenu.add_command(label="See Party Info", command=showPartyInfo)
+partymenu.add_command(label="About Current Party", command=showPartyInfo)
 menubar.add_cascade(label="Party", menu=partymenu)
 fontmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 150)))
 for font_name in ("Arial", "Times New Roman", "Courier New", "Verdana", "Tahoma", "Georgia", "Trebuchet MS", "Comic Sans MS", "Impact", "Calibri", "Consolas", "Segoe UI"):
@@ -527,6 +698,6 @@ root.config(menu=menubar)
 
 root.mainloop()
 
-# Supporting Multiple OSes and Updating, Leaving, Joining, Kicking, Destryoing, and info of Parties Logic left.
+# Supporting Multiple OSes and Updating, Leaving, Joining, Kicking, Kicking after Destroying Logic left.
 
 # Searching and Replacing, Word Count, Drag and Drop Text can be added in the future updates.
