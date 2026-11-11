@@ -89,7 +89,7 @@ body {
 }
 
 .imagebottom {
-  flex: 1;
+  flex: 1.05;
   display: flex;
   justify-content: center;
   align-items: center;
