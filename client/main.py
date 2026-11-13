@@ -221,9 +221,6 @@ def createParty():
     if partymode:
         showerror("In Party Mode", "You are already in a party. Please leave the current party first.")
         return
-    party_code = None
-    party_password = None
-    party_name = None
     try:
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.connect((HOST, PORT))
@@ -233,6 +230,9 @@ def createParty():
             data = party_socket.recv(1024)
             if data == b"Invalid Request":
                 showerror("Failed to connect", "The client failed to connect to the server, please try agan later or report to the developer.")
+                party_socket.close()
+                party_socket = None
+                return
         except socket.timeout:
             party_socket.close(); party_socket = None
             showerror("Connection Failed", "Server did not respond in time.")
@@ -261,7 +261,6 @@ def createParty():
     tk.Label(win, text="Name:", font=("Arial", 14)).grid(row=3, column=0, padx=10, pady=(15, 5), sticky="e")
     name_var = tk.StringVar()
     tk.Entry(win, textvariable=name_var, width=25).grid(row=3, column=1, padx=10, pady=(15, 5))
-    result = {"password": None, "name": None}
     def submit(event=None):
         global party_password, party_name
         n = name_var.get().strip()
@@ -272,11 +271,9 @@ def createParty():
         if not n:
             showerror("Missing", "Please enter a name.", parent=win)
             return
+        win.destroy()
         party_password = p
         party_name = n
-        win.destroy()
-        if ':' in party_password:
-            showerror("Character not allowed", """The character ":" cannot be used inside the party password.""")
     tk.Button(win, text="Create Party", command=submit, width=30, relief="solid", borderwidth=1, bd=1).grid(row=4, column=0, columnspan=2, pady=15, padx=15)
     win.bind("<Return>", submit)
     win.bind("<Escape>", lambda e: win.destroy())
@@ -421,9 +418,6 @@ def joinParty():
     if partymode:
         showerror("In Party Mode", "You already currently in a party. Leave the current party first before joining another.")
         return
-    party_code = None
-    party_password = None
-    party_name = None
     is_host = False
     try:
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -476,7 +470,6 @@ def joinParty():
         if not n:
             showerror("Missing", "Please enter a name.", parent=win)
             return
-        
         result["code"] = c
         result["password"] = p
         result["name"] = n
@@ -528,7 +521,8 @@ def joinParty():
 def leaveParty(silent=False):
     global partymode, party_socket, party_code, party_name
     if not partymode or party_socket is None:
-        showerror("Not in Party Mode", "You are not currently in a party.")
+        if not silent:
+            showerror("Not in Party Mode", "You are not currently in a party.")
         return
     if is_host:
         answer = askyesnocancel("Host", "You are the host of this party. If you leave, the role of host will be transferred to the person who joined the earliest. Confirm Leaving?")
@@ -540,7 +534,8 @@ def leaveParty(silent=False):
             data = party_socket.recv(1024)
         except socket.timeout:
             party_socket.close(); party_socket = None
-            showerror("Connection Failed", "Server did not respond in time.")
+            if not silent:
+                showerror("Connection Failed", "Server did not respond in time.")
             return
         if data == b"Left Party":
             partymode = False
@@ -553,11 +548,13 @@ def leaveParty(silent=False):
             is_host = False
             party_name = ""
         else:
-            showerror("Leave Party Failed", f"Could not leave party. Server replied: {data.decode('utf-8')}")
+            if not silent:
+                showerror("Leave Party Failed", f"Could not leave party. Server replied: {data.decode('utf-8')}")
             party_socket.close()
             party_socket = None
     except Exception as e:
-        showerror("Leave Party Failed", f"Could not leave party. Error: {str(e)}")
+        if not silent:
+            showerror("Leave Party Failed", f"Could not leave party. Error: {str(e)}")
 
 def showPartyInfo():
     global party_code, party_password, party_name

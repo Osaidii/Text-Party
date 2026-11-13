@@ -5,7 +5,7 @@ import json
 import shutil
 import threading
 
-VERSION = 1.0
+VERSION = "1.0"
 HOST = "127.0.0.1"
 PORT = 3467
 
@@ -24,8 +24,11 @@ def handleClient(conn, addr):
                 continue
             parts = line.split(":", 4)
             if parts[0] == "handshake":
+                if len(parts) < 2:
+                    conn.sendall(b"Invalid Request")
+                    return
                 if parts[1] != VERSION:
-                    return conn.sendall("Wrong Version")
+                    return conn.sendall(b"Wrong Version")
                 sendGreeting(conn, addr)
             elif parts[0] == "create":
                 createParty(conn, addr, parts)
@@ -35,8 +38,8 @@ def handleClient(conn, addr):
                 joinParty(conn, addr, parts)
             elif parts[0] == "leave":
                 leaveParty(conn, addr, parts)
-            elif parts[0] == "remove":
-                removeMember(conn, addr, parts)
+            elif parts[0] == "update":
+                askedForUpdate(conn, addr, parts)
             else:
                 print(f"Unknown Request from {addr}: {data}")
                 conn.sendall(b"Unknown Request")
@@ -44,11 +47,6 @@ def handleClient(conn, addr):
         print(f"[-] Connection reset by {addr}")
     except OSError as e:
         print(f"[-] SocketError from {addr}: {e}")
-    finally:
-        try:
-            conn.close()
-        except OSError:
-            pass
     
 def sendGreeting(conn, addr):
     status = b"Hello"
@@ -63,6 +61,9 @@ def createParty(conn, addr, parts):
     party_code = parts[1]
     password = parts[2]
     name = parts[3]
+    if party_code is None or party_code == "" or password is None or password == "" or name is None or name == "":
+        conn.sendall(b"Invalid Request")
+        return
     if not (party_code.isdigit() and len(party_code) == 6):
         conn.sendall(b"Invalid Request")
         return
@@ -142,7 +143,7 @@ def joinParty(conn, addr, parts):
     print(f"[+] Party joined by {addr}: Code={party_code}")
 
 def leaveParty(conn, addr, parts):
-    if len(parts) != 4:
+    if len(parts) != 3:
         conn.sendall(b"Error: Invalid Request")
         print(f"[-] Invalid leave request from {addr}: {parts}")
         return
@@ -171,43 +172,27 @@ def leaveParty(conn, addr, parts):
         return
     print(f"[+] Party left by {addr}: Code={party_code}, Name={name}")
 
-def removeMember(conn, addr, parts):
-    if len(parts) != 5:
-        conn.sendall(b"Error: Invalid Request")
-        print(f"[-] Invalid leave request from {addr}: {parts}")
+def askedForUpdate(conn, addr, parts):
+    if len(parts) != 3:
+        conn.sendall(b"Invalid Request")
+        print(f"[-] Invalid Update request from {addr}: {parts}")
         return
     party_code = parts[1]
-    party_password = parts[2]
-    party_name = parts[3]
-    target_name = parts[4]
+    name = parts[2]
     if not (party_code.isdigit() and len(party_code) == 6):
         conn.sendall(b"Invalid Request")
         return
     try:
         with party_lock:
-            with open(f"parties/{party_code}/info.json", "r") as f:
+            with open(f"parties/{party_code}/info.json") as f:
                 t = json.load(f)
-            if t["password"] != party_password:
-                conn.sendall(b"Wrong Password")
-                return
-            if party_name != target_name:
-                if t["host"] != party_name:
-                    conn.sendall(b"Is not Host")
-                    return
-            elif target_name in t["members"]:
-                t["members"].remove(target_name)
-            else:
-                conn.sendall(b"Error: Member not found")
-                return
-        with party_lock:
-            with open(f"parties/{party_code}/info.json", "w") as f:
-                json.dump(t, f)
-        conn.sendall(b"Removed Member")
-    except (OSError, json.JSONDecodeError) as e:
-        print(f"[-] Error removing member for {addr}: {e}")
-        conn.sendall(b"Error: Could not remove member")
+    except (OSError, json.JSONDecodeError):
+        conn.sendall(b"Destroyed")
         return
-    print(f"[+] Member removed by {addr}: Code={party_code}, Name={target_name}")
+    if name == t["host"]:
+        conn.sendall(b"New Host")
+        return
+    conn.sendall(b"Alive")
 
 def main():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -221,7 +206,7 @@ def main():
             t = threading.Thread(target=handleClient, args=(conn, addr))
             t.start()
     except KeyboardInterrupt:
-        print(f"[-] Server stopped.")
+        print(f"[-] Server stopped.") 
     finally:
         server.close()
 
