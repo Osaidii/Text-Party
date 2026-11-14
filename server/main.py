@@ -6,50 +6,60 @@ import shutil
 import threading
 import time
 import random
-import string
 
 VERSION = "1.0"
 HOST = "127.0.0.1"
 PORT = 3467
 
+active_conns = 0
+max_conns = 50
 party_lock = threading.Lock()
 
 def handleClient(conn, addr):
-    print(f"[+] Connected by {addr}")
+    global active_conns
     try:
-        while True:
-            data = conn.recv(1024)
-            if not data:
-                print(f"[-] Disconnected by {addr}")
-                break
-            line = data.decode("utf-8").strip()
-            if not line:
-                continue
-            parts = line.split(":", 4)
-            if parts[0] == "handshake":
-                if len(parts) < 2:
-                    conn.sendall(b"Invalid Request")
-                    return
-                if parts[1] != VERSION:
-                    return conn.sendall(b"Wrong Version")
-                sendGreeting(conn, addr)
-            elif parts[0] == "create":
-                createParty(conn, addr, parts)
-            elif parts[0] == "destroy":
-                destroyParty(conn, addr, parts)
-            elif parts[0] == "join":
-                joinParty(conn, addr, parts)
-            elif parts[0] == "leave":
-                leaveParty(conn, addr, parts)
-            elif parts[0] == "update":
-                askedForUpdate(conn, addr, parts)
-            else:
-                print(f"Unknown Request from {addr}: {data}")
-                conn.sendall(b"Unknown Request")
-    except ConnectionResetError:
-        print(f"[-] Connection reset by {addr}")
-    except OSError as e:
-        print(f"[-] SocketError from {addr}: {e}")
+        conn.settimeout(10.0)
+        print(f"[+] Connected by {addr}")
+        try:
+            while True:
+                data = conn.recv(1024)
+                if not data:
+                    print(f"[-] Disconnected by {addr}")
+                    break
+                line = data.decode("utf-8").strip()
+                if not line:
+                    continue
+                parts = line.split(":", 4)
+                if parts[0] == "handshake":
+                    if len(parts) < 2:
+                        conn.sendall(b"Invalid Request")
+                        return
+                    if parts[1] != VERSION:
+                        return conn.sendall(b"Wrong Version")
+                    sendGreeting(conn, addr)
+                elif parts[0] == "create":
+                    createParty(conn, addr, parts)
+                elif parts[0] == "destroy":
+                    destroyParty(conn, addr, parts)
+                elif parts[0] == "join":
+                    joinParty(conn, addr, parts)
+                elif parts[0] == "leave":
+                    leaveParty(conn, addr, parts)
+                elif parts[0] == "update":
+                    askedForUpdate(conn, addr, parts)
+                else:
+                    print(f"Unknown Request from {addr}: {data}")
+                    conn.sendall(b"Unknown Request")
+        except ConnectionResetError:
+            print(f"[-] Connection reset by {addr}")
+        except OSError as e:
+            print(f"[-] SocketError from {addr}: {e}")
+        except socket.timeout:
+            print(f"[-] Timeout from {addr}")
+    finally:
+        with party_lock:
+            active_conns -= 1
+        conn.close()
     
 def sendGreeting(conn, addr):
     status = b"Hello"
@@ -234,6 +244,11 @@ def main():
     try:
         while True:
             conn, addr = server.accept()
+            with party_lock:
+                if active_conns >= max_conns:
+                    conn.close()
+                    continue
+                active_conns += 1
             t = threading.Thread(target=handleClient, args=(conn, addr))
             t.start()
     except KeyboardInterrupt:

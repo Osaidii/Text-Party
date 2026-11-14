@@ -1,6 +1,6 @@
 import tkinter as tk
 import os
-from tkinter.filedialog import askopenfile, asksaveasfile
+from tkinter.filedialog import askopenfilename, asksaveasfilename
 from tkinter.messagebox import showinfo, showerror, askyesnocancel
 import socket
 import secrets
@@ -34,6 +34,7 @@ os.makedirs(save_folder, exist_ok=True)
 def acquireInstanceLock():
     global instance_lock_socket
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         s.bind((HOST, LOCK_PORT))
         s.listen(1)
@@ -97,11 +98,11 @@ def openFile():
         continue_forward = askUserToSave()
         if not continue_forward:
             return
-    f = askopenfile(mode='r', filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
-    if f is None:
+    path = askopenfilename(filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+    if not path:
         return
     try:
-        with f:
+        with open(path, "r", encoding="utf-8") as f:
             t = f.read()
     except UnicodeDecodeError as e:
         showerror("Open Failed", "Could not open file, please ensure it is a valid text file.")
@@ -111,11 +112,11 @@ def openFile():
         return
     text.delete("1.0", tk.END)
     text.insert("1.0", t)     
-    user_filepath = f.name
+    user_filepath = path
     backup_filepath = os.path.join(save_folder, os.path.basename(user_filepath))
     text.edit_reset()
     autosave_fails = 0
-    setWindowName(os.path.basename(f.name))
+    setWindowName(os.path.basename(path))
     scheduleAutosave()
     
 def changeFont(changed_font):
@@ -226,7 +227,7 @@ def createParty():
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.connect((HOST, PORT))
         party_socket.settimeout(5.0)
-        party_socket.sendall(f"handshake:{VERSION}".encode())
+        party_socket.sendall(f"handshake:{VERSION}\n".encode())
         try:
             data = party_socket.recv(1024)
             if data == b"Invalid Request":
@@ -249,7 +250,7 @@ def createParty():
             party_socket.close()
             party_socket = None
             return
-    except ConnectionRefusedError:
+    except (ConnectionRefusedError, socket.timeout, OSError):
         party_socket.close()
         party_socket = None
         showerror("Connection Failed", "Could not connect to the server, please try later or report to the developer.")
@@ -296,7 +297,7 @@ def createParty():
             party_socket.close()
             party_socket = None
             return
-    party_socket.sendall(f"create:{party_code}:{party_password}:{party_name}".encode("utf-8"))
+    party_socket.sendall(f"create:{party_code}:{party_password}:{party_name}\n".encode("utf-8"))
     try:
         data = party_socket.recv(1024)
     except socket.timeout:
@@ -330,7 +331,7 @@ def askForUpdate():
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.settimeout(2.0)
         party_socket.connect((HOST, PORT))
-        party_socket.sendall(f"update:{party_code}:{party_name}".encode('utf-8'))
+        party_socket.sendall(f"update:{party_code}:{party_name}\n".encode('utf-8'))
         data = party_socket.recv(1024)
     except (socket.timeout, OSError):
         updates_failed += 1
@@ -396,7 +397,7 @@ def destroyParty():
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.settimeout(5.0)
         party_socket.connect((HOST, PORT))
-        party_socket.sendall(f"destroy:{party_code}:{result['password']}:{party_name}".encode("utf-8"))
+        party_socket.sendall(f"destroy:{party_code}:{result['password']}:{party_name}\n".encode("utf-8"))
         try:
             data = party_socket.recv(1024)
         except socket.timeout:
@@ -430,7 +431,7 @@ def joinParty():
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.connect((HOST, PORT))
         party_socket.settimeout(5.0)
-        party_socket.sendall(f"handshake:{VERSION}".encode())
+        party_socket.sendall(f"handshake:{VERSION}\n".encode())
         try:
             data = party_socket.recv(1024)
         except socket.timeout:
@@ -447,7 +448,7 @@ def joinParty():
             party_socket.close()
             party_socket = None
             return
-    except ConnectionRefusedError:
+    except (ConnectionRefusedError, socket.timeout, OSError):
         party_socket.close()
         party_socket = None
         showerror("Connection Failed", "Could not connect to the server, please try later or report to the developer.")
@@ -501,7 +502,7 @@ def joinParty():
         party_socket = None
         return
     try:
-        party_socket.sendall(f"join:{result['code']}:{result['password']}:{result['name']}".encode("utf-8"))
+        party_socket.sendall(f"join:{result['code']}:{result['password']}:{result['name']}\n".encode("utf-8"))
         try:
             data = party_socket.recv(1024)
         except socket.timeout:
@@ -557,7 +558,7 @@ def leaveParty(silent=False):
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.settimeout(5.0)
         party_socket.connect((HOST, PORT))
-        party_socket.sendall(f"leave:{party_code}:{party_name}".encode("utf-8"))
+        party_socket.sendall(f"leave:{party_code}:{party_name}\n".encode("utf-8"))
         try:
             data = party_socket.recv(1024)
         except socket.timeout:
@@ -632,21 +633,21 @@ def saveFile():
 
 def saveAs():
     global backup_filepath, user_filepath, autosave_fails
-    f = asksaveasfile(mode='w', defaultextension=".txt", initialdir=save_folder, filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
-    if f == None:
+    path = asksaveasfilename(defaultextension=".txt", initialdir=save_folder, filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+    if not path:
         return False
     t = text.get("1.0", "end-1c")
-    user_filepath = f.name
-    backup_filepath = os.path.join(save_folder, os.path.basename(user_filepath))
     try:
-        with f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(t)
-        setWindowName(os.path.basename(f.name))
-        autosave_fails = 0
-        scheduleAutosave()
     except (OSError, UnicodeEncodeError) as e:
         showerror(title="Oops!", message="Unable to save file...", detail=str(e))
         return False
+    user_filepath = path
+    backup_filepath = os.path.join(save_folder, os.path.basename(user_filepath))
+    setWindowName(os.path.basename(path))
+    autosave_fails = 0
+    scheduleAutosave()
     try:
         with open(backup_filepath, "w", encoding="utf-8") as b:
             b.write(t)
