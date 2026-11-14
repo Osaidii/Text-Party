@@ -4,6 +4,9 @@ import os
 import json
 import shutil
 import threading
+import time
+import random
+import string
 
 VERSION = "1.0"
 HOST = "127.0.0.1"
@@ -82,6 +85,7 @@ def createParty(conn, addr, parts):
         conn.sendall(b"Error: Could not create party")
         return
     print(f"[+] Party created by {addr}: Code={party_code}, Password={password}, Name={name}")
+    updateFolderMTime(os.path.join(os.path.join(os.path.dirname(os.path.abspath(__file__))), "parties", party_code))
 
 def destroyParty(conn, addr, parts):
     if len(parts) != 4:
@@ -132,6 +136,7 @@ def joinParty(conn, addr, parts):
         with party_lock:
             with open(f"parties/{party_code}/info.json", "w") as f:
                 json.dump(t, f)
+                updateFolderMTime(os.path.join(os.path.join(os.path.dirname(os.path.abspath(__file__))), "parties", party_code))
         conn.sendall(b"Joined Party")
     except FileNotFoundError:
         conn.sendall(b"Invalid Code")
@@ -165,6 +170,7 @@ def leaveParty(conn, addr, parts):
         with party_lock:
             with open(f"parties/{party_code}/info.json", "w") as f:
                 json.dump(t, f)
+                updateFolderMTime(os.path.join(os.path.join(os.path.dirname(os.path.abspath(__file__))), "parties", party_code))
         conn.sendall(b"Left Party")
     except (OSError, json.JSONDecodeError) as e:
         print(f"[-] Error leaving party for {addr}: {e}")
@@ -194,6 +200,31 @@ def askedForUpdate(conn, addr, parts):
         return
     conn.sendall(b"Alive")
 
+def deleteInactiveParties():
+    while True:
+        try:
+            self_dir = os.path.dirname(os.path.abspath(__file__))
+            parties_dir = os.path.join(self_dir, "parties")
+            dirs = [e.name for e in os.scandir(parties_dir) if e.is_dir()]
+            for i in dirs:
+                seconds_ago = time.time() - os.path.getmtime(os.path.join(parties_dir, i))
+                if seconds_ago > 3600:
+                    shutil.rmtree(os.path.join(parties_dir, i))
+        except FileNotFoundError:
+            pass
+        time.sleep(600)
+
+def updateFolderMTime(dir):
+    chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.~:"
+    random_string = ''.join(random.choice(chars) for _ in range(15))
+    temp_path = os.path.join(dir, random_string)
+    try:
+        with open(temp_path, "x"):
+            pass
+        os.remove(temp_path)
+    except OSError:
+        pass
+
 def main():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -211,4 +242,5 @@ def main():
         server.close()
 
 if __name__ == "__main__":
+    threading.Thread(target=deleteInactiveParties, daemon=True).start()
     main()
