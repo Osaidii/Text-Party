@@ -47,15 +47,18 @@ def handleClient(conn, addr):
                     leaveParty(conn, addr, parts)
                 elif parts[0] == "update":
                     askedForUpdate(conn, addr, parts)
+                elif parts[0] == "edit":
+                    handleEdit(conn, addr, parts)
                 else:
                     print(f"Unknown Request from {addr}: {data}")
                     conn.sendall(b"Unknown Request")
+        except socket.timeout:
+            print(f"[-] Timeout from {addr}")
         except ConnectionResetError:
             print(f"[-] Connection reset by {addr}")
         except OSError as e:
             print(f"[-] SocketError from {addr}: {e}")
-        except socket.timeout:
-            print(f"[-] Timeout from {addr}")
+        
     finally:
         with party_lock:
             active_conns -= 1
@@ -89,6 +92,8 @@ def createParty(conn, addr, parts):
         with party_lock:
             with open(f"parties/{party_code}/info.json", "w") as f:
                 json.dump({"code": party_code, "password": password, "host": name, "members": [name]}, f)
+            with open(f"parties/{party_code}/text.txt", "w") as f:
+                f.write("")
         conn.sendall(b"Party Created")
     except OSError as e:
         print(f"[-] Error creating party for {addr}: {e}")
@@ -158,12 +163,13 @@ def joinParty(conn, addr, parts):
     print(f"[+] Party joined by {addr}: Code={party_code}")
 
 def leaveParty(conn, addr, parts):
-    if len(parts) != 3:
+    if len(parts) != 4:
         conn.sendall(b"Error: Invalid Request")
         print(f"[-] Invalid leave request from {addr}: {parts}")
         return
     party_code = parts[1]
-    name = parts[2]
+    party_password = parts[2]
+    name = parts[3]
     if not (party_code.isdigit() and len(party_code) == 6):
         conn.sendall(b"Invalid Request")
         return
@@ -171,6 +177,9 @@ def leaveParty(conn, addr, parts):
         with party_lock:
             with open(f"parties/{party_code}/info.json", "r") as f:
                 t = json.load(f)
+        if party_password != t["password"]:
+            conn.sendall(b"Invalid Request")
+            return
         if name not in t["members"]:
             conn.sendall(b"Error: Member not found")
             return
@@ -207,8 +216,12 @@ def askedForUpdate(conn, addr, parts):
         return
     if name == t["host"]:
         conn.sendall(b"New Host")
-        return
-    conn.sendall(b"Alive")
+    else:
+        conn.sendall(b"Alive")
+    conn.settimeout(None)
+
+def handleEdit(conn, addr, parts):
+    pass
 
 def deleteInactiveParties():
     while True:
@@ -236,6 +249,7 @@ def updateFolderMTime(dir):
         pass
 
 def main():
+    global active_conns, max_conns
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((HOST, PORT))
@@ -249,7 +263,7 @@ def main():
                     conn.close()
                     continue
                 active_conns += 1
-            t = threading.Thread(target=handleClient, args=(conn, addr))
+            t = threading.Thread(target=handleClient, args=(conn, addr), daemon=True)
             t.start()
     except KeyboardInterrupt:
         print(f"[-] Server stopped.") 

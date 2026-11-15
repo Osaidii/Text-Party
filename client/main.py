@@ -23,6 +23,7 @@ party_socket = None
 party_code = 0
 party_password = ""
 party_name = ""
+party_channel = None
 updates_failed = 0
 is_host = False
 font = "Arial"
@@ -208,7 +209,10 @@ def onClose():
     root.destroy()
 
 def _undo_separator_on_key(event):
-    text.edit_separator()
+    if event.char and event.char.isprintable() and not (event.state & 0x4):
+        text.edit_separator()
+    elif event.keysym in ("Return", "KP_Enter", "BackSpace", "Delete", "Tab"):
+        text.edit_separator()
     return None
 
 
@@ -231,7 +235,7 @@ def createParty():
         try:
             data = party_socket.recv(1024)
             if data == b"Invalid Request":
-                showerror("Failed to Connect", "The client failed to connect to the server, please try agan later or report to the developer.")
+                showerror("Failed to Connect", "The client failed to connect to the server, please try again later or report to the developer.")
                 party_socket.close()
                 party_socket = None
                 return
@@ -241,7 +245,7 @@ def createParty():
             showerror("Connection Failed", "Server did not respond in time.")
             return
         if data == b"Wrong Version":
-            showerror("Wrong Verion", "Please update to the latest version to use all party functions.")
+            showerror("Wrong Version", "Please update to the latest version to use all party functions.")
             party_socket.close()
             party_socket = None
             return
@@ -291,7 +295,7 @@ def createParty():
         party_socket.close()
         party_socket = None
         return
-    for i in range([party_code, party_password, party_name]):
+    for i in [party_code, party_password, party_name]:
         if ':' in i:
             showerror("Unallowed Character Used", "You cannot use a colon ':' inside any of the fields, please retry with a different entry.")
             party_socket.close()
@@ -315,7 +319,7 @@ def createParty():
         is_host = True
         setWindowName(f"Party {party_code} | Text Party")
         showinfo("Party Created", f"Your party has been created successfully.\n\nJoin Code: {party_code}\nPassword: {party_password}")
-        updateScheduling()
+        askForUpdate()
     else:
         showerror("Party Creation Failed", f"Could not create party. Server replied: {data.decode('utf-8')}")
         party_socket.close()
@@ -324,15 +328,17 @@ def createParty():
         return
 
 def askForUpdate():
-    global partymode, party_socket, party_code, party_name, is_host, updates_failed
+    global partymode, party_channel, party_code, party_name, is_host, updates_failed
     if not partymode:
         return
+    if party_channel is not None:
+        return
     try:
-        party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        party_socket.settimeout(2.0)
-        party_socket.connect((HOST, PORT))
-        party_socket.sendall(f"update:{party_code}:{party_name}\n".encode('utf-8'))
-        data = party_socket.recv(1024)
+        party_channel = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        party_channel.settimeout(2.0)
+        party_channel.connect((HOST, PORT))
+        party_channel.sendall(f"update:{party_code}:{party_name}\n".encode('utf-8'))
+        data = party_channel.recv(1024)
     except (socket.timeout, OSError):
         updates_failed += 1
         if updates_failed >= 3:
@@ -341,21 +347,18 @@ def askForUpdate():
             partymode = False
         return
     if data == b"Destroyed":
-        showerror("Party Destroyed", "This party has been destroyed by the host or does not exist at all. The text on your screen will stay but you cannot recieve or send any further updates.")
-        party_socket.close()
+        showerror("Party Destroyed", "This party has been destroyed by the host or does not exist at all. The text on your screen will stay but you cannot receive or send any further updates.")
+        party_channel.close()
         partymode = False
-        party_socket = None
+        party_channel = None
         return
     if data == b"New Host" and not is_host:
         showinfo("Selected as Host", "Since the original host has left, you have been selected as the new one. This grants you the power to destroy the party.")
         is_host = True
         return
-    if not (data == b"Alive"):
-        party_socket.close(); party_socket = None
-        showerror("Connection Failed", "Server did not respond in time.")
 
 def destroyParty():
-    global partymode, party_socket, party_code, party_password, party_name, is_host
+    global partymode, party_socket, party_code, party_password, party_name, is_host, party_channel
     if not partymode or party_socket is None:
         showerror("Not in Party Mode", "You are not currently in a party.")
         return
@@ -382,17 +385,20 @@ def destroyParty():
     win.bind("<Return>", submit)
     win.bind("<Escape>", lambda e: win.destroy())
     win.wait_window()
-    for i in range([party_code, party_password, party_name]):
+    for i in [party_code, party_password, party_name]:
         if ':' in i:
             showerror("Unexpected Error Encountered", "There might be a problem in your software files, please redownload the software if you keep encountering this error.")
             party_socket.close()
             party_socket = None
+            if party_channel is not None:
+                party_channel.close()
+                party_channel = None
             return
     try:
         if result["password"] != party_password:
             return
-        askyesnocancel_result = askyesnocancel("Confirm Destruction", "Are you sure you want to destroy the party? This action cannot be undone. Memebers will also be kicked")
-        if askyesnocancel_result is None:
+        askyesnocancel_result = askyesnocancel("Confirm Destruction", "Are you sure you want to destroy the party? This action cannot be undone. Members will also be kicked")
+        if not askyesnocancel_result:
             return
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.settimeout(5.0)
@@ -401,7 +407,11 @@ def destroyParty():
         try:
             data = party_socket.recv(1024)
         except socket.timeout:
-            party_socket.close(); party_socket = None
+            party_socket.close(); 
+            party_socket = None
+            if party_channel is not None:
+                party_channel.close()
+                party_channel = None
             showerror("Connection Failed", "Server did not respond in time.")
             return
         if data == b"Party Destroyed":
@@ -410,6 +420,9 @@ def destroyParty():
             showinfo("Party Destroyed", "Your party has been destroyed successfully.")
             party_socket.close()
             party_socket = None
+            if party_channel is not None:
+                party_channel.close()
+                party_channel = None
             party_code = 0
             party_password = ""
             party_name = ""
@@ -424,7 +437,7 @@ def destroyParty():
 def joinParty():
     global partymode, party_socket, party_code, party_password, party_name, is_host
     if partymode:
-        showerror("In Party Mode", "You already currently in a party. Leave the current party first before joining another.")
+        showerror("In Party Mode", "You are already in a party. Leave the current party first before joining another.")
         return
     is_host = False
     try:
@@ -439,7 +452,7 @@ def joinParty():
             showerror("Connection Failed", "Server did not respond in time.")
             return
         if data == b"Wrong Version":
-            showerror("Wrong Verion", "Please update to the latest version to use all party functions.")
+            showerror("Wrong Version", "Please update to the latest version to use all party functions.")
             party_socket.close()
             party_socket = None
             return
@@ -453,12 +466,6 @@ def joinParty():
         party_socket = None
         showerror("Connection Failed", "Could not connect to the server, please try later or report to the developer.")
         return
-    for i in range([party_code, party_password, party_name]):
-        if ':' in i:
-            showerror("Unallowed Character Used", "You cannot use a colon ':' inside any of the fields, please retry with a different entry.")
-            party_socket.close()
-            party_socket = None
-            return
     win = tk.Toplevel(root)
     win.title("Join Party")
     win.geometry("300x200")
@@ -501,6 +508,12 @@ def joinParty():
         party_socket.close()
         party_socket = None
         return
+    for i in [result["code"], result["password"], result["name"]]:
+        if ':' in i:
+            showerror("Unallowed Character Used", "You cannot use a colon ':' inside any of the fields, please retry with a different entry.")
+            party_socket.close()
+            party_socket = None
+            return
     try:
         party_socket.sendall(f"join:{result['code']}:{result['password']}:{result['name']}\n".encode("utf-8"))
         try:
@@ -516,7 +529,7 @@ def joinParty():
             party_code = result["code"]
             party_password = result["password"]
             party_name = result["name"]
-            updateScheduling()
+            askForUpdate()
         elif data == b"Wrong Password" or data == b"Invalid Request":
             showerror("Join Party Failed", "The party code or password is incorrect.")
             party_socket.close()
@@ -539,12 +552,12 @@ def joinParty():
         party_socket = None
 
 def leaveParty(silent=False):
-    global partymode, party_socket, party_code, party_name
+    global partymode, party_socket, party_code, party_name, party_password, party_channel, is_host
     if not partymode or party_socket is None:
         if not silent:
             showerror("Not in Party Mode", "You are not currently in a party.")
         return
-    for i in range([party_code, party_password, party_name]):
+    for i in [party_code, party_password, party_name]:
         if ':' in i:
             showerror("Unexpected Error Encountered", "There might be a problem in your software files, please redownload the software if you keep encountering this error.")
             party_socket.close()
@@ -558,11 +571,15 @@ def leaveParty(silent=False):
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.settimeout(5.0)
         party_socket.connect((HOST, PORT))
-        party_socket.sendall(f"leave:{party_code}:{party_name}\n".encode("utf-8"))
+        party_socket.sendall(f"leave:{party_code}:{party_password}:{party_name}\n".encode("utf-8"))
         try:
             data = party_socket.recv(1024)
         except socket.timeout:
-            party_socket.close(); party_socket = None
+            party_socket.close(); 
+            party_socket = None
+            if party_channel is not None:
+                party_channel.close()
+                party_channel = None
             if not silent:
                 showerror("Connection Failed", "Server did not respond in time.")
             return
@@ -573,6 +590,9 @@ def leaveParty(silent=False):
                 showinfo("Left Party", "You have left the party successfully.")
             party_socket.close()
             party_socket = None
+            if party_channel is not None:
+                party_channel.close()
+                party_channel = None
             party_code = 0
             is_host = False
             party_name = ""
@@ -581,15 +601,13 @@ def leaveParty(silent=False):
                 showerror("Leave Party Failed", f"Could not leave party. Server replied: {data.decode('utf-8')}")
             party_socket.close()
             party_socket = None
+            if party_channel is not None:
+                party_channel.close()
+                party_channel = None
     except Exception as e:
+        print(repr(e))
         if not silent:
             showerror("Leave Party Failed", f"Could not leave party. Error: {str(e)}")
-
-def updateScheduling():
-    if not partymode:
-        return
-    askForUpdate()
-    root.after(10000, updateScheduling)
 
 def showPartyInfo():
     global party_code, party_password, party_name
@@ -702,7 +720,7 @@ def autosave():
         with open(backup_filepath, "w", encoding="utf-8") as b:
             b.write(t)
     except (OSError, UnicodeEncodeError) as e:
-        showerror("Backup Failed", "A backup has failed. Your perosnal save file has still been saved.", detail=str(e))
+        showerror("Backup Failed", "A backup has failed. Your personal save file has still been saved.", detail=str(e))
     
 def askUserToSave():
     answer = askyesnocancel("Save File", "Do you want to save the file? It is currently unsaved.")
@@ -777,7 +795,6 @@ partymenu.add_command(label="Destroy Party", command=destroyParty)
 partymenu.add_command(label="Join Party", command=joinParty)
 partymenu.add_command(label="Leave Party", command=leaveParty)
 partymenu.add_separator()
-partymenu.add_command(label="See Party Info", command=showPartyInfo)
 partymenu.add_command(label="About Current Party", command=showPartyInfo)
 menubar.add_cascade(label="Party", menu=partymenu)
 fontmenu = tk.Menu(menubar, bg="#FFFFFF", fg="#303030", activebackground="#555555", activeforeground="#FFFFFF", tearoff=0, font=("Arial", int(screen_width / 150)))
