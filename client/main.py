@@ -4,13 +4,17 @@ from tkinter.filedialog import askopenfilename, asksaveasfilename
 from tkinter.messagebox import showinfo, showerror, askyesnocancel
 import socket
 import secrets
+import threading
+import base64
 
 VERSION = "1.0"
-HOST = "127.0.0.1"
 PORT = 3467
 LOCK_PORT = 3468
 LIGHTCOLOR = "#E4E4E4"
 DARKCOLOR = "#303030"
+
+SERVER_HOST = "192.168.1.176"
+LOCK_HOST = "127.0.0.1"
 
 instance_lock_socket = None
 
@@ -25,6 +29,9 @@ party_password = ""
 party_name = ""
 party_channel = None
 updates_failed = 0
+last_synced_text = ""
+backspace_count = 0
+backspace_job = None
 is_host = False
 font = "Arial"
 current_mode = "Dark"
@@ -37,7 +44,7 @@ def acquireInstanceLock():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        s.bind((HOST, LOCK_PORT))
+        s.bind((LOCK_HOST, LOCK_PORT))
         s.listen(1)
         instance_lock_socket = s
         return True
@@ -223,13 +230,13 @@ def aboutParty():
     showinfo(title="About Party", message="A party can be described as a group or a room which when used, can allow other joined members to edit and update the same text file.")
 
 def createParty():
-    global partymode, party_code, party_socket, party_password, party_name, is_host
+    global partymode, party_code, party_socket, party_password, party_name, is_host, last_synced_text, backspace_job, backspace_count
     if partymode:
         showerror("In Party Mode", "You are already in a party, please leave the current party first.")
         return
     try:
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        party_socket.connect((HOST, PORT))
+        party_socket.connect((SERVER_HOST, PORT))
         party_socket.settimeout(5.0)
         party_socket.sendall(f"handshake:{VERSION}\n".encode())
         try:
@@ -319,7 +326,13 @@ def createParty():
         is_host = True
         setWindowName(f"Party {party_code} | Text Party")
         showinfo("Party Created", f"Your party has been created successfully.\n\nJoin Code: {party_code}\nPassword: {party_password}")
+        last_synced_text = ""
+        backspace_job = None
+        backspace_count = 0
         askForUpdate()
+        syncText()
+        party_socket.close()
+        party_socket = None
     else:
         showerror("Party Creation Failed", f"Could not create party. Server replied: {data.decode('utf-8')}")
         party_socket.close()
@@ -327,39 +340,9 @@ def createParty():
         is_host = False
         return
 
-def askForUpdate():
-    global partymode, party_channel, party_code, party_name, is_host, updates_failed
-    if not partymode:
-        return
-    if party_channel is not None:
-        return
-    try:
-        party_channel = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        party_channel.settimeout(2.0)
-        party_channel.connect((HOST, PORT))
-        party_channel.sendall(f"update:{party_code}:{party_name}\n".encode('utf-8'))
-        data = party_channel.recv(1024)
-    except (socket.timeout, OSError):
-        updates_failed += 1
-        if updates_failed >= 3:
-            updates_failed = 0
-            showerror("Connection Failed", "The client cannot establish a connection with the server, please restart client or try again later.")
-            partymode = False
-        return
-    if data == b"Destroyed":
-        showerror("Party Destroyed", "This party has been destroyed by the host or does not exist at all. The text on your screen will stay but you cannot receive or send any further updates.")
-        party_channel.close()
-        partymode = False
-        party_channel = None
-        return
-    if data == b"New Host" and not is_host:
-        showinfo("Selected as Host", "Since the original host has left, you have been selected as the new one. This grants you the power to destroy the party.")
-        is_host = True
-        return
-
 def destroyParty():
     global partymode, party_socket, party_code, party_password, party_name, is_host, party_channel
-    if not partymode or party_socket is None:
+    if not partymode:
         showerror("Not in Party Mode", "You are not currently in a party.")
         return
     win = tk.Toplevel(root)
@@ -402,7 +385,7 @@ def destroyParty():
             return
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.settimeout(5.0)
-        party_socket.connect((HOST, PORT))
+        party_socket.connect((SERVER_HOST, PORT))
         party_socket.sendall(f"destroy:{party_code}:{result['password']}:{party_name}\n".encode("utf-8"))
         try:
             data = party_socket.recv(1024)
@@ -435,14 +418,14 @@ def destroyParty():
         showerror("Party Destruction Failed", f"Could not destroy party. Error: {str(e)}")
 
 def joinParty():
-    global partymode, party_socket, party_code, party_password, party_name, is_host
+    global partymode, party_socket, party_code, party_password, party_name, is_host, last_synced_text, backspace_job, backspace_count
     if partymode:
         showerror("In Party Mode", "You are already in a party. Leave the current party first before joining another.")
         return
     is_host = False
     try:
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        party_socket.connect((HOST, PORT))
+        party_socket.connect((SERVER_HOST, PORT))
         party_socket.settimeout(5.0)
         party_socket.sendall(f"handshake:{VERSION}\n".encode())
         try:
@@ -529,6 +512,9 @@ def joinParty():
             party_code = result["code"]
             party_password = result["password"]
             party_name = result["name"]
+            last_synced_text = ""
+            backspace_job = None
+            backspace_count = 0
             askForUpdate()
         elif data == b"Wrong Password" or data == b"Invalid Request":
             showerror("Join Party Failed", "The party code or password is incorrect.")
@@ -553,7 +539,7 @@ def joinParty():
 
 def leaveParty(silent=False):
     global partymode, party_socket, party_code, party_name, party_password, party_channel, is_host
-    if not partymode or party_socket is None:
+    if not partymode:
         if not silent:
             showerror("Not in Party Mode", "You are not currently in a party.")
         return
@@ -570,7 +556,7 @@ def leaveParty(silent=False):
     try:
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.settimeout(5.0)
-        party_socket.connect((HOST, PORT))
+        party_socket.connect((SERVER_HOST, PORT))
         party_socket.sendall(f"leave:{party_code}:{party_password}:{party_name}\n".encode("utf-8"))
         try:
             data = party_socket.recv(1024)
@@ -609,9 +595,164 @@ def leaveParty(silent=False):
         if not silent:
             showerror("Leave Party Failed", f"Could not leave party. Error: {str(e)}")
 
+def askForUpdate():
+    global partymode, party_channel, party_code, party_name, is_host, updates_failed
+    if not partymode:
+        return
+    if party_channel is not None:
+        return
+    try:
+        party_channel = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        party_channel.settimeout(2.0)
+        party_channel.connect((SERVER_HOST, PORT))
+        party_channel.sendall(f"update:{party_code}:{party_name}\n".encode('utf-8'))
+    except (socket.timeout, OSError):
+        party_channel = None
+        updates_failed += 1
+        if updates_failed >= 3:
+            updates_failed = 0
+            showerror("Connection Failed", "The client cannot establish a connection with the server, please restart client or try again later.")
+            partymode = False
+        return
+    buffer = b""
+    got_status = False
+    try:
+        while not got_status:
+            chunk = party_channel.recv(4096)
+            if not chunk:
+                party_channel = None
+                partymode = False
+                return
+            buffer += chunk
+            while b"\n" in buffer:
+                line_bytes, buffer = buffer.split(b"\n", 1)
+                line = line_bytes.decode("utf-8").strip()
+                if not line:
+                    continue
+                if line.startswith("text:"):
+                    apply_text_snapshot(line[5:])
+                elif line == "Destroyed":
+                    showerror("Party Destroyed", "This party has been destroyed by the host or does not exist at all.")
+                    party_channel.close()
+                    party_channel = None
+                    partymode = False
+                    return
+                elif line == "New Host":
+                    if not is_host:
+                        showinfo("Selected as Host", "Since the original host has left, you have been selected as the new one.")
+                        is_host = True
+                    got_status = True
+                elif line == "Alive":
+                    got_status = True
+    except (socket.timeout, OSError):
+        party_channel.close()
+        party_channel = None
+        return
+    party_channel.settimeout(None)
+    threading.Thread(target=readChannel, daemon=True).start()
+
+def readChannel():
+    buffer = b""
+    while True:
+        try:
+            data = party_channel.recv(4096)
+        except OSError:
+            break
+        if not data:
+            break
+        buffer += data
+        while b"\n" in buffer:
+            line_bytes, buffer = buffer.split(b"\n", 1)
+            line = line_bytes.decode("utf-8").strip()
+            if not line:
+                continue
+            parts = line.split(":", 3)
+            if parts[0] == "edit" and len(parts) >= 4:
+                if parts[1] == "add":
+                    root.after(0, apply_add, int(parts[2]), parts[3])
+                elif parts[1] == "remove":
+                    root.after(0, apply_remove, int(parts[2]), int(parts[3]))
+            else:
+                print(line)
+
+def syncText():
+    global last_synced_text
+    print(f"syncText called: partymode={partymode}, channel={party_channel}, last={repr(last_synced_text)}, current={repr(text.get('1.0', 'end-1c'))}")
+    if not partymode or party_channel is None:
+        return
+    current = text.get("1.0", "end-1c")
+    if current == last_synced_text:
+        return
+    i = 0
+    while i < len(current) and i < len(last_synced_text) and current[i] == last_synced_text[i]:
+        i += 1
+    remove_count = len(last_synced_text) - i
+    if remove_count > 0:
+        try: party_channel.sendall(f"edit:remove:{i}:{remove_count}\n".encode())
+        except OSError: pass
+    insert_text = current[i:]
+    if insert_text:
+        payload = base64.b64encode(insert_text.encode()).decode()
+        try: party_channel.sendall(f"edit:add:{i}:{payload}\n".encode())
+        except OSError: pass
+    last_synced_text = current
+
+def apply_add(index, b64):
+    global last_synced_text
+    new = base64.b64decode(b64).decode()
+    text.insert(text.index(f"1.0 + {index} chars"), new)
+    last_synced_text = text.get("1.0", "end-1c")
+
+def apply_remove(index, count):
+    global last_synced_text
+    start = text.index(f"1.0 + {index} chars")
+    end = text.index(f"1.0 + {index + count} chars")
+    text.delete(start, end)
+    last_synced_text = text.get("1.0", "end-1c")
+
+def apply_text_snapshot(b64):
+    global last_synced_text
+    if not b64:
+        return
+    t = base64.b64decode(b64).decode("utf-8")
+    if not t:
+        return
+    if t == text.get("1.0", "end-1c"):
+        last_synced_text = t
+        return
+    text.delete("1.0", "end")
+    text.insert("1.0", t)
+    last_synced_text = t
+
+def on_space(event=None):
+    print("on_space fired")
+    if not partymode:
+        return
+    syncText()
+
+def on_backspace(event=None):
+    global backspace_count, backspace_job
+    if not partymode:
+        return
+    backspace_count += 1
+    if backspace_job is not None:
+        try:
+            text.after_cancel(backspace_job)
+        except (ValueError, tk.TclError):
+            pass
+    backspace_job = text.after(1000, on_backspace_idle)
+
+def on_backspace_idle():
+    global backspace_count, backspace_job
+    backspace_job = None
+    backspace_count = 0
+    if not partymode:
+        return
+    syncText()
+
 def showPartyInfo():
     global party_code, party_password, party_name
-    if not partymode or party_socket is None:
+    if not partymode:
         showerror("Not in Party Mode", "You are not currently in a party.")
         return
     win = tk.Toplevel(root)
@@ -768,6 +909,8 @@ text.bind("<Control-O>", lambda event: openFile())
 text.bind("<Control-0>", lambda event: changeFontSize(default_font_size))
 text.bind("<Control-8>", zoomIn)
 text.bind("<Control-9>", zoomOut)
+text.bind("<KeyRelease-space>", on_space)
+text.bind("<KeyRelease-BackSpace>", on_backspace)
 text.bind("<Key>", _undo_separator_on_key)
 
 menubar = tk.Menu(root, font=("Arial"))

@@ -6,19 +6,23 @@ import shutil
 import threading
 import time
 import random
+import base64
 
 VERSION = "1.0"
-HOST = "127.0.0.1"
+HOST = "0.0.0.0"
 PORT = 3467
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 active_conns = 0
 max_conns = 50
 party_lock = threading.Lock()
 
+subs = {}
+
 def handleClient(conn, addr):
     global active_conns
     try:
-        conn.settimeout(10.0)
+        conn.settimeout(120.0)
         print(f"[+] Connected by {addr}")
         try:
             while True:
@@ -58,10 +62,13 @@ def handleClient(conn, addr):
             print(f"[-] Connection reset by {addr}")
         except OSError as e:
             print(f"[-] SocketError from {addr}: {e}")
-        
     finally:
         with party_lock:
             active_conns -= 1
+        with party_lock:
+            for party_list in subs.values():
+                if conn in party_list:
+                    party_list.remove(conn)
         conn.close()
     
 def sendGreeting(conn, addr):
@@ -84,15 +91,15 @@ def createParty(conn, addr, parts):
         conn.sendall(b"Invalid Request")
         return
     try:
-        os.makedirs(f"parties/{party_code}", exist_ok=False)
+        os.makedirs(os.path.join(BASE_DIR, "parties", party_code), exist_ok=False)
     except FileExistsError:
         conn.sendall(b"Code Taken")
         return
     try:
         with party_lock:
-            with open(f"parties/{party_code}/info.json", "w") as f:
+            with open(os.path.join(BASE_DIR, "parties", party_code, "info.json"), "w") as f:
                 json.dump({"code": party_code, "password": password, "host": name, "members": [name]}, f)
-            with open(f"parties/{party_code}/text.txt", "w") as f:
+            with open(os.path.join(BASE_DIR, "parties", party_code, "text.txt"), "w") as f:
                 f.write("")
         conn.sendall(b"Party Created")
     except OSError as e:
@@ -115,12 +122,12 @@ def destroyParty(conn, addr, parts):
         return
     try:
         with party_lock:
-            with open(f"parties/{party_code}/info.json", "r") as f:
+            with open(os.path.join(BASE_DIR, "parties", party_code, "info.json"), "r") as f:
                 info = json.load(f)
         if info["password"] != password or info["host"] != name:
             conn.sendall(b"Invalid Request")
             return
-        shutil.rmtree(f"parties/{party_code}")
+        shutil.rmtree(os.path.join(BASE_DIR, "parties", party_code))
         conn.sendall(b"Party Destroyed")
     except (OSError, json.JSONDecodeError) as e:
         print(f"[-] Error destroying party for {addr}: {e}")
@@ -137,7 +144,7 @@ def joinParty(conn, addr, parts):
     password = parts[2]
     try:
         with party_lock:
-            with open(f"parties/{party_code}/info.json", "r") as f:
+            with open(os.path.join(BASE_DIR, "parties", party_code, "info.json"), "r") as f:
                 t = json.load(f)
         if t["password"] != password:
             conn.sendall(b"Invalid Request")
@@ -149,7 +156,7 @@ def joinParty(conn, addr, parts):
         if new_name not in t["members"]:
             t["members"].append(new_name)
         with party_lock:
-            with open(f"parties/{party_code}/info.json", "w") as f:
+            with open(os.path.join(BASE_DIR, "parties", party_code, "info.json"), "w") as f:
                 json.dump(t, f)
                 updateFolderMTime(os.path.join(os.path.join(os.path.dirname(os.path.abspath(__file__))), "parties", party_code))
         conn.sendall(b"Joined Party")
@@ -175,7 +182,7 @@ def leaveParty(conn, addr, parts):
         return
     try:
         with party_lock:
-            with open(f"parties/{party_code}/info.json", "r") as f:
+            with open(os.path.join(BASE_DIR, "parties", party_code, "info.json"), "r") as f:
                 t = json.load(f)
         if party_password != t["password"]:
             conn.sendall(b"Invalid Request")
@@ -187,7 +194,7 @@ def leaveParty(conn, addr, parts):
         if name == t["host"]:
             t["host"] = t["members"][0] if t["members"] else ""
         with party_lock:
-            with open(f"parties/{party_code}/info.json", "w") as f:
+            with open(os.path.join(BASE_DIR, "parties", party_code, "info.json"), "w") as f:
                 json.dump(t, f)
                 updateFolderMTime(os.path.join(os.path.join(os.path.dirname(os.path.abspath(__file__))), "parties", party_code))
         conn.sendall(b"Left Party")
@@ -199,29 +206,57 @@ def leaveParty(conn, addr, parts):
 
 def askedForUpdate(conn, addr, parts):
     if len(parts) != 3:
-        conn.sendall(b"Invalid Request")
+        conn.sendall(b"Invalid Request\n")
         print(f"[-] Invalid Update request from {addr}: {parts}")
         return
     party_code = parts[1]
     name = parts[2]
     if not (party_code.isdigit() and len(party_code) == 6):
-        conn.sendall(b"Invalid Request")
+        conn.sendall(b"Invalid Request\n")
         return
     try:
         with party_lock:
-            with open(f"parties/{party_code}/info.json") as f:
+            with open(os.path.join(BASE_DIR, "parties", party_code, "info.json")) as f:
                 t = json.load(f)
     except (OSError, json.JSONDecodeError):
-        conn.sendall(b"Destroyed")
+        conn.sendall(b"Destroyed\n")
         return
+    try:
+        with open(os.path.join(BASE_DIR, "parties", party_code, "text.txt"), encoding="utf-8") as f:
+            current = f.read()
+        b64 = base64.b64encode(current.encode()).decode()
+        conn.sendall(f"text:{b64}\n".encode())
+    except OSError:
+        conn.sendall(b"text:\n")
     if name == t["host"]:
-        conn.sendall(b"New Host")
+        conn.sendall(b"New Host\n")
     else:
-        conn.sendall(b"Alive")
+        conn.sendall(b"Alive\n")
     conn.settimeout(None)
+    with party_lock:
+        subs.setdefault(party_code, []).append(conn)
 
 def handleEdit(conn, addr, parts):
-    pass
+    print(f"[EDIT] received: {parts}")
+    kind, index = parts[1], int(parts[2])
+    with party_lock:
+        party_code = next((c for c, l in subs.items() if conn in l), None)
+        with open(os.path.join(BASE_DIR, "parties", party_code, "text.txt"), encoding="utf-8") as f:
+            current = f.read()
+    if kind == "add":
+        text = base64.b64decode(parts[3]).decode("utf-8")
+        new_text = current[:index] + text + current[index:]
+    else:
+        new_text = current[:index] + current[index + int(parts[3]):]
+    with party_lock:
+        with open(os.path.join(BASE_DIR, "parties", party_code, "text.txt"), "w", encoding="utf-8" ) as f:
+            f.write(new_text)
+        for c in subs.get(party_code, []):
+            if c is not conn:
+                try: c.sendall(("edit:" + ":".join(parts[1:]) + "\n").encode("utf-8"))
+                except OSError: pass
+    print(f"[+] Edit from {addr}: {parts}")
+    conn.sendall(b"OK\n")
 
 def deleteInactiveParties():
     while True:
