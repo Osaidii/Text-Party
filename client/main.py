@@ -8,13 +8,12 @@ import threading
 import base64
 
 VERSION = "1.0"
-PORT = 3467
+SERVER_HOST = "bore.pub"
+LOCK_HOST = "127.0.0.1"
+SERVER_PORT = 28625
 LOCK_PORT = 3468
 LIGHTCOLOR = "#E4E4E4"
 DARKCOLOR = "#303030"
-
-SERVER_HOST = "192.168.1.176"
-LOCK_HOST = "127.0.0.1"
 
 instance_lock_socket = None
 
@@ -236,7 +235,7 @@ def createParty():
         return
     try:
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        party_socket.connect((SERVER_HOST, PORT))
+        party_socket.connect((SERVER_HOST, SERVER_PORT))
         party_socket.settimeout(5.0)
         party_socket.sendall(f"handshake:{VERSION}\n".encode())
         try:
@@ -385,7 +384,7 @@ def destroyParty():
             return
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.settimeout(5.0)
-        party_socket.connect((SERVER_HOST, PORT))
+        party_socket.connect((SERVER_HOST, SERVER_PORT))
         party_socket.sendall(f"destroy:{party_code}:{result['password']}:{party_name}\n".encode("utf-8"))
         try:
             data = party_socket.recv(1024)
@@ -425,7 +424,7 @@ def joinParty():
     is_host = False
     try:
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        party_socket.connect((SERVER_HOST, PORT))
+        party_socket.connect((SERVER_HOST, SERVER_PORT))
         party_socket.settimeout(5.0)
         party_socket.sendall(f"handshake:{VERSION}\n".encode())
         try:
@@ -556,7 +555,7 @@ def leaveParty(silent=False):
     try:
         party_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_socket.settimeout(5.0)
-        party_socket.connect((SERVER_HOST, PORT))
+        party_socket.connect((SERVER_HOST, SERVER_PORT))
         party_socket.sendall(f"leave:{party_code}:{party_password}:{party_name}\n".encode("utf-8"))
         try:
             data = party_socket.recv(1024)
@@ -604,7 +603,7 @@ def askForUpdate():
     try:
         party_channel = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         party_channel.settimeout(2.0)
-        party_channel.connect((SERVER_HOST, PORT))
+        party_channel.connect((SERVER_HOST, SERVER_PORT))
         party_channel.sendall(f"update:{party_code}:{party_name}\n".encode('utf-8'))
     except (socket.timeout, OSError):
         party_channel = None
