@@ -1,5 +1,5 @@
 # Text Party
-Text Party is a text collaboration software that is straight to the point.  
+Text Party is a text collaboration software that is straight to the point (still in the works but demo is up).
 
 ## Description
 You can use it like a normal notepad or invite members to edit the same document.  
