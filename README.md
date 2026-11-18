@@ -11,7 +11,7 @@ IF you want to run the code itself, you only need python (tkinter on linux aswel
 Right now only windows client works but future updates will add more platforms.  
 The server only works and will only work for Linux.
 
-## Core ideas:
+## Theme and Core ideas:
 This is supposed to be a co op software that is an open source alternate to google docs or software like it.  
 None of you data is stored on the Text Party servers except that required to connect you to your party members.  
 
